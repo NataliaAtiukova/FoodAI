@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
@@ -23,18 +24,22 @@ class HomeScreen extends StatefulWidget {
 class HomeScreenState extends State<HomeScreen> {
   final TextEditingController _controller = TextEditingController();
   final ImagePicker _picker = ImagePicker();
-  NutritionGoal _selectedGoal = NutritionGoal.healthyLifestyle;
-  NutritionAnalysis? _latestAnalysis;
+  NutritionResult? _latestResult;
   List<VisionPrediction>? _latestPredictions;
   String? _lastImagePath;
   bool _isLoading = false;
   String _pendingSource = 'Ручной ввод';
   bool _savingToDiary = false;
   String _lastAnalysisSource = 'Ручной ввод';
+  final TextEditingController _gramsController =
+      TextEditingController(text: '100');
+  double _grams = 100;
+  NutritionFacts? _baseFactsPer100g;
 
   @override
   void dispose() {
     _controller.dispose();
+    _gramsController.dispose();
     super.dispose();
   }
 
@@ -83,8 +88,15 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _addAnalysisToDiary() async {
-    final analysis = _latestAnalysis;
-    if (analysis == null || _savingToDiary) {
+    final result = _latestResult;
+    final baseFacts = _baseFactsPer100g;
+    if (result == null || baseFacts == null || _savingToDiary) {
+      return;
+    }
+
+    final grams = _grams;
+    if (grams <= 0) {
+      _showSnackBar('Укажите граммовку блюда.');
       return;
     }
 
@@ -95,16 +107,16 @@ class HomeScreenState extends State<HomeScreen> {
 
     setState(() => _savingToDiary = true);
     try {
-      final facts = analysis.result.facts;
       await DiaryService.instance.addEntry(
-        name: analysis.result.name,
-        brand: analysis.result.brand,
-        calories: facts.calories,
-        protein: facts.protein,
-        fat: facts.fat,
-        carbs: facts.carbs,
-        goal: _selectedGoal.label,
-        advice: analysis.advice,
+        name: result.name,
+        brand: result.brand,
+        grams: grams,
+        caloriesPer100g: baseFacts.calories,
+        proteinPer100g: baseFacts.protein,
+        fatPer100g: baseFacts.fat,
+        carbsPer100g: baseFacts.carbs,
+        goal: 'Home',
+        advice: 'Добавлено из Home.',
         category: category,
         source: 'Home',
         imagePath: _lastImagePath,
@@ -177,6 +189,14 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _onGramsChanged(String value) {
+    final parsed = double.tryParse(value.replaceAll(',', '.'));
+    if (parsed == null || parsed <= 0) {
+      return;
+    }
+    setState(() => _grams = parsed);
+  }
+
   Future<void> _offerManualFallback() async {
     if (!mounted) {
       return;
@@ -202,7 +222,7 @@ class HomeScreenState extends State<HomeScreen> {
               FilledButton.icon(
                 onPressed: () {
                   Navigator.of(context).pop();
-                  widget.onNavigateToTab?.call(2);
+                  widget.onNavigateToTab?.call(1);
                 },
                 icon: const Icon(Icons.search_outlined),
                 label: const Text('Перейти к поиску'),
@@ -261,7 +281,7 @@ class HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       _isLoading = true;
-      _latestAnalysis = null;
+      _latestResult = null;
       if (source != null && source == 'Ручной ввод') {
         _latestPredictions = null;
         _lastImagePath = null;
@@ -273,22 +293,20 @@ class HomeScreenState extends State<HomeScreen> {
     }
 
     try {
-      final analysis = await NutritionService.instance.analyzeWithAdvice(
-        query,
-        _selectedGoal,
-      );
+      final result = await NutritionService.instance.fetchNutrition(query);
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _latestAnalysis = analysis;
+        _latestResult = result;
         _lastAnalysisSource = _pendingSource;
+        _baseFactsPer100g = result.facts;
+        _grams = 100;
+        _gramsController.text = '100';
       });
       _pendingSource = 'Ручной ввод';
     } on NutritionException catch (e) {
-      _showSnackBar(e.message);
-    } on DietAdviceException catch (e) {
       _showSnackBar(e.message);
     } catch (e) {
       _showSnackBar('Ошибка анализа: $e');
@@ -312,6 +330,7 @@ class HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final numberFormat = NumberFormat('#,##0');
+    final baseFacts = _baseFactsPer100g;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -361,33 +380,6 @@ class HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            Text(
-              'Ваша цель',
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            DropdownButtonFormField<NutritionGoal>(
-              value: _selectedGoal,
-              items: NutritionGoal.values
-                  .map(
-                    (goal) => DropdownMenuItem<NutritionGoal>(
-                      value: goal,
-                      child: Text(goal.displayName),
-                    ),
-                  )
-                  .toList(),
-              decoration: InputDecoration(
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() => _selectedGoal = value);
-                }
-              },
-            ),
             const SizedBox(height: 24),
             FilledButton(
               onPressed:
@@ -406,7 +398,7 @@ class HomeScreenState extends State<HomeScreen> {
                     )
                   : const Text('Посчитать'),
             ),
-            if (_latestAnalysis != null) ...<Widget>[
+            if (_latestResult != null && baseFacts != null) ...<Widget>[
               const SizedBox(height: 24),
               Text(
                 'Результат анализа',
@@ -414,12 +406,15 @@ class HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 12),
               _SummaryCard(
-                analysis: _latestAnalysis!,
+                result: _latestResult!,
                 imagePath: _lastImagePath,
                 predictions: _latestPredictions,
                 numberFormat: numberFormat,
                 sourceLabel: _lastAnalysisSource,
-                goalLabel: _selectedGoal.displayName,
+                baseFacts: baseFacts,
+                grams: _grams,
+                gramsController: _gramsController,
+                onGramsChanged: _onGramsChanged,
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
@@ -444,24 +439,46 @@ class HomeScreenState extends State<HomeScreen> {
 
 class _SummaryCard extends StatelessWidget {
   const _SummaryCard({
-    required this.analysis,
+    required this.result,
     required this.imagePath,
     required this.predictions,
     required this.numberFormat,
     required this.sourceLabel,
-    required this.goalLabel,
+    required this.baseFacts,
+    required this.grams,
+    required this.gramsController,
+    required this.onGramsChanged,
   });
 
-  final NutritionAnalysis analysis;
+  final NutritionResult result;
   final String? imagePath;
   final List<VisionPrediction>? predictions;
   final NumberFormat numberFormat;
   final String sourceLabel;
-  final String goalLabel;
+  final NutritionFacts baseFacts;
+  final double grams;
+  final TextEditingController gramsController;
+  final ValueChanged<String> onGramsChanged;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final macroFormat = NumberFormat('#,##0.0');
+
+    String formatValue(double value) {
+      return value % 1 == 0
+          ? numberFormat.format(value)
+          : macroFormat.format(value);
+    }
+
+    final scaledFacts = NutritionFacts(
+      calories: baseFacts.calories * grams / 100,
+      protein: baseFacts.protein * grams / 100,
+      fat: baseFacts.fat * grams / 100,
+      carbs: baseFacts.carbs * grams / 100,
+    );
+    final gramsText = formatValue(grams);
+
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       elevation: 0,
@@ -471,21 +488,20 @@ class _SummaryCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text(
-              analysis.result.name,
+              result.name,
               style: theme.textTheme.titleMedium
                   ?.copyWith(fontWeight: FontWeight.bold),
             ),
-            if (analysis.result.brand != null &&
-                analysis.result.brand!.isNotEmpty) ...<Widget>[
+            if (result.brand != null && result.brand!.isNotEmpty) ...<Widget>[
               const SizedBox(height: 6),
               Text(
-                analysis.result.brand!,
+                result.brand!,
                 style: theme.textTheme.bodySmall,
               ),
             ],
             const SizedBox(height: 8),
             Text(
-              'Источник: $sourceLabel · Цель: $goalLabel',
+              'Источник: $sourceLabel',
               style: theme.textTheme.bodySmall,
             ),
             if (imagePath != null && File(imagePath!).existsSync()) ...<Widget>[
@@ -500,26 +516,78 @@ class _SummaryCard extends StatelessWidget {
               ),
             ],
             const SizedBox(height: 12),
+            Text(
+              'Пищевая ценность на 100 г',
+              style: theme.textTheme.labelLarge
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
             Wrap(
               spacing: 12,
               runSpacing: 12,
               children: <Widget>[
                 _SummaryMetric(
-                    title: 'Калории',
-                    value:
-                        '${numberFormat.format(analysis.result.facts.calories)} ккал'),
+                  title: 'Калории',
+                  value: '${formatValue(baseFacts.calories)} ккал',
+                ),
                 _SummaryMetric(
-                    title: 'Белки',
-                    value:
-                        '${numberFormat.format(analysis.result.facts.protein)} г'),
+                  title: 'Белки',
+                  value: '${formatValue(baseFacts.protein)} г',
+                ),
                 _SummaryMetric(
-                    title: 'Жиры',
-                    value:
-                        '${numberFormat.format(analysis.result.facts.fat)} г'),
+                  title: 'Жиры',
+                  value: '${formatValue(baseFacts.fat)} г',
+                ),
                 _SummaryMetric(
-                    title: 'Углеводы',
-                    value:
-                        '${numberFormat.format(analysis.result.facts.carbs)} г'),
+                  title: 'Углеводы',
+                  value: '${formatValue(baseFacts.carbs)} г',
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: gramsController,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: <TextInputFormatter>[
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+              ],
+              decoration: InputDecoration(
+                labelText: 'Граммовка',
+                suffixText: 'г',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              onChanged: onGramsChanged,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Итого для $gramsText г',
+              style: theme.textTheme.labelLarge
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: <Widget>[
+                _SummaryMetric(
+                  title: 'Калории',
+                  value: '${formatValue(scaledFacts.calories)} ккал',
+                ),
+                _SummaryMetric(
+                  title: 'Белки',
+                  value: '${formatValue(scaledFacts.protein)} г',
+                ),
+                _SummaryMetric(
+                  title: 'Жиры',
+                  value: '${formatValue(scaledFacts.fat)} г',
+                ),
+                _SummaryMetric(
+                  title: 'Углеводы',
+                  value: '${formatValue(scaledFacts.carbs)} г',
+                ),
               ],
             ),
             if (predictions != null && predictions!.isNotEmpty) ...<Widget>[
@@ -540,45 +608,6 @@ class _SummaryCard extends StatelessWidget {
                     .toList(),
               ),
             ],
-            const SizedBox(height: 16),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color:
-                    theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      CircleAvatar(
-                        backgroundColor: theme.colorScheme.primary,
-                        radius: 16,
-                        child: Icon(
-                          Icons.bolt,
-                          size: 18,
-                          color: theme.colorScheme.onPrimary,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        'Совет FoodAI',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    analysis.advice,
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),

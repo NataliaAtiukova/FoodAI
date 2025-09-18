@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_secrets.dart';
 import 'screens/diary_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/my_product_screen.dart';
-import 'screens/progress_screen.dart';
+import 'screens/advice_screen.dart';
 import 'screens/search_screen.dart';
 import 'services/diary_service.dart';
 
@@ -29,10 +28,9 @@ class _FoodAiAppState extends State<FoodAiApp> {
   Widget build(BuildContext context) {
     final tabs = <Widget>[
       HomeScreen(onNavigateToTab: _setCurrentIndex),
-      const DiaryScreen(),
       const SearchScreen(),
-      const MyProductScreen(),
-      const ProgressScreen(),
+      const DiaryScreen(),
+      const AdviceScreen(),
     ];
 
     return MaterialApp(
@@ -59,15 +57,21 @@ class _FoodAiAppState extends State<FoodAiApp> {
           onTap: (index) => setState(() => _currentIndex = index),
           items: const <BottomNavigationBarItem>[
             BottomNavigationBarItem(
-                icon: Icon(Icons.home_outlined), label: 'Home'),
+              icon: Icon(Icons.home_outlined),
+              label: 'Home',
+            ),
             BottomNavigationBarItem(
-                icon: Icon(Icons.book_outlined), label: 'Diary'),
+              icon: Icon(Icons.search_outlined),
+              label: 'Search',
+            ),
             BottomNavigationBarItem(
-                icon: Icon(Icons.search_outlined), label: 'Search'),
+              icon: Icon(Icons.book_outlined),
+              label: 'Diary',
+            ),
             BottomNavigationBarItem(
-                icon: Icon(Icons.edit_outlined), label: 'Мой продукт'),
-            BottomNavigationBarItem(
-                icon: Icon(Icons.show_chart_outlined), label: 'Progress'),
+              icon: Icon(Icons.lightbulb_outline),
+              label: 'Advice',
+            ),
           ],
         ),
       ),
@@ -79,13 +83,11 @@ class _FoodAiAppState extends State<FoodAiApp> {
       case 0:
         return 'FoodAI';
       case 1:
-        return 'Мой дневник';
-      case 2:
         return 'Поиск';
+      case 2:
+        return 'Мой дневник';
       case 3:
-        return 'Мой продукт';
-      case 4:
-        return 'Прогресс';
+        return 'Советы';
       default:
         return 'FoodAI';
     }

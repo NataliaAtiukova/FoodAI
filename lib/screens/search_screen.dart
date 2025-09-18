@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../models/diary_entry.dart';
 import '../models/meal_category.dart';
@@ -18,24 +19,32 @@ class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final TextEditingController _barcodeController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  NutritionGoal _selectedGoal = NutritionGoal.healthyLifestyle;
   bool _isLoading = false;
   bool _isBarcodeLoading = false;
   bool _isAdding = false;
   List<SearchFoodItem> _results = const <SearchFoodItem>[];
+  final Map<String, double> _itemGrams = <String, double>{};
+  final Map<String, TextEditingController> _gramControllers =
+      <String, TextEditingController>{};
 
   @override
   void dispose() {
     _controller.dispose();
     _barcodeController.dispose();
     _focusNode.dispose();
+    for (final controller in _gramControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
   Future<void> _search() async {
     final query = _controller.text.trim();
     if (query.isEmpty) {
-      setState(() => _results = const <SearchFoodItem>[]);
+      setState(() {
+        _results = const <SearchFoodItem>[];
+        _syncControllers(const <SearchFoodItem>[]);
+      });
       return;
     }
 
@@ -45,7 +54,10 @@ class _SearchScreenState extends State<SearchScreen> {
       if (!mounted) {
         return;
       }
-      setState(() => _results = items);
+      setState(() {
+        _results = items;
+        _syncControllers(items);
+      });
     } catch (error) {
       _showSnackBar('Ошибка поиска: $error');
     } finally {
@@ -87,33 +99,16 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() => _isAdding = true);
 
       try {
-        final ratio = grams / 100;
-        final scaledFacts = NutritionFacts(
-          calories: result.facts.calories * ratio,
-          protein: result.facts.protein * ratio,
-          fat: result.facts.fat * ratio,
-          carbs: result.facts.carbs * ratio,
-        );
-        String advice;
-        try {
-          advice = await NutritionService.instance.fetchDietAdvice(
-            scaledFacts,
-            _selectedGoal,
-            productName: result.name,
-          );
-        } catch (_) {
-          advice = 'Добавлено по штрихкоду.';
-        }
-
         await DiaryService.instance.addEntry(
           name: result.name,
           brand: result.brand,
-          calories: scaledFacts.calories,
-          protein: scaledFacts.protein,
-          fat: scaledFacts.fat,
-          carbs: scaledFacts.carbs,
-          goal: _selectedGoal.label,
-          advice: advice,
+          grams: grams,
+          caloriesPer100g: result.facts.calories,
+          proteinPer100g: result.facts.protein,
+          fatPer100g: result.facts.fat,
+          carbsPer100g: result.facts.carbs,
+          goal: 'Каталог',
+          advice: 'Добавлено по штрихкоду.',
           category: category,
           source: 'Search',
         );
@@ -141,58 +136,33 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
 
-    NutritionAnalysis? analysis;
-    NutritionFacts? facts;
-    double grams = 100;
-
-    if (item.factsPer100g != null) {
-      final value = await _askPortion(item.name);
-      if (value == null) {
-        return;
-      }
-      grams = value;
-      final ratio = grams / 100;
-      facts = NutritionFacts(
-        calories: item.factsPer100g!.calories * ratio,
-        protein: item.factsPer100g!.protein * ratio,
-        fat: item.factsPer100g!.fat * ratio,
-        carbs: item.factsPer100g!.carbs * ratio,
-      );
-    }
-
+    final grams = _gramsForItem(item);
     setState(() => _isAdding = true);
     try {
-      String advice;
-      String name;
-      if (facts != null) {
-        name = item.name;
-        try {
-          advice = await NutritionService.instance.fetchDietAdvice(
-            facts,
-            _selectedGoal,
-            productName: item.name,
-          );
-        } catch (_) {
-          advice = 'Добавлено из поиска OFF.';
-        }
+      NutritionFacts per100Facts;
+      const advice = 'Добавлено из поиска.';
+      String name = item.name;
+      String? brand = item.brand;
+
+      if (item.factsPer100g != null) {
+        per100Facts = item.factsPer100g!;
       } else {
-        analysis = await NutritionService.instance.analyzeWithAdvice(
-          item.name,
-          _selectedGoal,
-        );
-        facts = analysis.result.facts;
-        name = analysis.result.name;
-        advice = analysis.advice;
+        final result =
+            await NutritionService.instance.fetchNutrition(item.name);
+        per100Facts = result.facts;
+        name = result.name;
+        brand = result.brand ?? brand;
       }
 
       await DiaryService.instance.addEntry(
         name: name,
-        brand: item.brand ?? analysis?.result.brand,
-        calories: facts.calories,
-        protein: facts.protein,
-        fat: facts.fat,
-        carbs: facts.carbs,
-        goal: _selectedGoal.label,
+        brand: brand,
+        grams: grams,
+        caloriesPer100g: per100Facts.calories,
+        proteinPer100g: per100Facts.protein,
+        fatPer100g: per100Facts.fat,
+        carbsPer100g: per100Facts.carbs,
+        goal: 'Каталог',
         advice: advice,
         category: category,
         source: 'Search',
@@ -200,10 +170,11 @@ class _SearchScreenState extends State<SearchScreen> {
       if (!mounted) {
         return;
       }
+      final key = _itemKey(item);
+      _itemGrams[key] = grams;
+      _gramControllers[key]?.text = _formatGrams(grams);
       _showSnackBar('Добавлено в дневник');
     } on NutritionException catch (e) {
-      _showSnackBar(e.message);
-    } on DietAdviceException catch (e) {
       _showSnackBar(e.message);
     } catch (error) {
       _showSnackBar('Не удалось добавить: $error');
@@ -214,8 +185,11 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
-  Future<double?> _askPortion(String name) async {
-    final controller = TextEditingController(text: '100');
+  Future<double?> _askPortion(String name, {double initial = 100}) async {
+    final initialText = initial % 1 == 0
+        ? initial.toStringAsFixed(0)
+        : initial.toStringAsFixed(1);
+    final controller = TextEditingController(text: initialText);
     return showModalBottomSheet<double>(
       context: context,
       isScrollControlled: true,
@@ -312,6 +286,48 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  String _itemKey(SearchFoodItem item) =>
+      '${item.name.toLowerCase()}|${item.brand?.toLowerCase() ?? ''}';
+
+  double _gramsForItem(SearchFoodItem item) =>
+      _itemGrams[_itemKey(item)] ?? 100;
+
+  TextEditingController _controllerForItem(SearchFoodItem item) {
+    final key = _itemKey(item);
+    return _gramControllers.putIfAbsent(
+      key,
+      () => TextEditingController(text: _formatGrams(_gramsForItem(item))),
+    );
+  }
+
+  void _syncControllers(List<SearchFoodItem> items) {
+    final keepKeys = items.map(_itemKey).toSet();
+    final keysToRemove = _gramControllers.keys
+        .where((key) => !keepKeys.contains(key))
+        .toList(growable: false);
+    for (final key in keysToRemove) {
+      _gramControllers.remove(key)?.dispose();
+      _itemGrams.remove(key);
+    }
+    for (final item in items) {
+      final key = _itemKey(item);
+      _gramControllers.putIfAbsent(
+        key,
+        () => TextEditingController(text: _formatGrams(_gramsForItem(item))),
+      );
+    }
+  }
+
+  void _updateGramsFromInput(String key, String raw) {
+    final parsed = double.tryParse(raw.replaceAll(',', '.'));
+    if (parsed != null && parsed > 0) {
+      setState(() => _itemGrams[key] = parsed);
+    }
+  }
+
+  String _formatGrams(double value) =>
+      value % 1 == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
+
   DiaryEntry? _findMatchingEntry(
       List<DiaryEntry> entries, SearchFoodItem item) {
     for (final entry in entries) {
@@ -396,29 +412,6 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            DropdownButtonFormField<NutritionGoal>(
-              value: _selectedGoal,
-              onChanged: (value) {
-                if (value != null) {
-                  setState(() => _selectedGoal = value);
-                }
-              },
-              decoration: InputDecoration(
-                labelText: 'Цель питания',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              items: NutritionGoal.values
-                  .map(
-                    (goal) => DropdownMenuItem<NutritionGoal>(
-                      value: goal,
-                      child: Text(goal.displayName),
-                    ),
-                  )
-                  .toList(),
-            ),
-            const SizedBox(height: 16),
             if (_isLoading)
               const Expanded(
                 child: Center(child: CircularProgressIndicator()),
@@ -440,54 +433,181 @@ class _SearchScreenState extends State<SearchScreen> {
                       itemBuilder: (context, index) {
                         final item = _results[index];
                         final entry = _findMatchingEntry(entries, item);
-                        final added = entry != null;
+                        final isAdded = entry != null;
                         final theme = Theme.of(context);
-                        final subtitleChildren = <Widget>[];
-                        if (item.brand != null && item.brand!.isNotEmpty) {
-                          subtitleChildren.add(Text(item.brand!));
-                        }
-                        if (added) {
-                          subtitleChildren.add(
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'Добавлено',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.primary,
-                                ),
-                              ),
-                            ),
-                          );
-                        }
+                        final number = NumberFormat('#,##0');
+                        final decimal = NumberFormat('#,##0.0');
 
-                        return ListTile(
-                          leading: item.thumbnailUrl != null
-                              ? CircleAvatar(
-                                  backgroundImage:
-                                      NetworkImage(item.thumbnailUrl!))
-                              : const CircleAvatar(
-                                  child: Icon(Icons.restaurant_outlined)),
-                          title: Text(item.name),
-                          subtitle: subtitleChildren.isEmpty
-                              ? null
-                              : Column(
+                        String formatValue(double value) => value % 1 == 0
+                            ? number.format(value)
+                            : decimal.format(value);
+
+                        final grams = _gramsForItem(item);
+                        final gramsText = '${formatValue(grams)} г';
+                        final NutritionFacts? scaledFacts = item.factsPer100g ==
+                                null
+                            ? null
+                            : NutritionFacts(
+                                calories:
+                                    item.factsPer100g!.calories * grams / 100,
+                                protein:
+                                    item.factsPer100g!.protein * grams / 100,
+                                fat: item.factsPer100g!.fat * grams / 100,
+                                carbs: item.factsPer100g!.carbs * grams / 100,
+                              );
+
+                        final controller = _controllerForItem(item);
+                        final key = _itemKey(item);
+
+                        return Card(
+                          elevation: 0,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            side: BorderSide(
+                              color: theme.colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: subtitleChildren,
+                                  children: <Widget>[
+                                    item.thumbnailUrl != null
+                                        ? ClipRRect(
+                                            borderRadius:
+                                                BorderRadius.circular(16),
+                                            child: Image.network(
+                                              item.thumbnailUrl!,
+                                              height: 60,
+                                              width: 60,
+                                              fit: BoxFit.cover,
+                                            ),
+                                          )
+                                        : CircleAvatar(
+                                            radius: 30,
+                                            backgroundColor: theme
+                                                .colorScheme.secondaryContainer,
+                                            child: Icon(
+                                              Icons.restaurant_outlined,
+                                              color: theme.colorScheme
+                                                  .onSecondaryContainer,
+                                            ),
+                                          ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: <Widget>[
+                                          Text(
+                                            item.name,
+                                            style: theme.textTheme.titleMedium
+                                                ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          if (item.brand != null &&
+                                              item.brand!.isNotEmpty)
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.only(top: 4),
+                                              child: Text(
+                                                item.brand!,
+                                                style:
+                                                    theme.textTheme.bodySmall,
+                                              ),
+                                            ),
+                                          if (item.factsPer100g != null)
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.only(top: 8),
+                                              child: Text(
+                                                'На 100 г · ${formatValue(item.factsPer100g!.calories)} ккал · '
+                                                'Б ${formatValue(item.factsPer100g!.protein)} г · '
+                                                'Ж ${formatValue(item.factsPer100g!.fat)} г · '
+                                                'У ${formatValue(item.factsPer100g!.carbs)} г',
+                                                style:
+                                                    theme.textTheme.bodySmall,
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                          trailing: FilledButton.tonalIcon(
-                            onPressed: _isAdding
-                                ? null
-                                : () {
-                                    if (added) {
-                                      _removeEntry(entry);
-                                    } else {
-                                      _addFood(item);
-                                    }
+                                const SizedBox(height: 14),
+                                TextField(
+                                  controller: controller,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                          decimal: true),
+                                  decoration: InputDecoration(
+                                    labelText: 'Граммовка',
+                                    suffixText: 'г',
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                  ),
+                                  onChanged: (value) =>
+                                      _updateGramsFromInput(key, value),
+                                  onEditingComplete: () {
+                                    _updateGramsFromInput(
+                                        key, controller.text.trim());
+                                    FocusScope.of(context).unfocus();
                                   },
-                            icon:
-                                Icon(added ? Icons.delete_outline : Icons.add),
-                            label: Text(added ? 'Удалить' : 'Добавить'),
+                                ),
+                                if (scaledFacts != null) ...<Widget>[
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Для $gramsText · ${formatValue(scaledFacts.calories)} ккал',
+                                    style: theme.textTheme.bodyMedium,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Б ${formatValue(scaledFacts.protein)} г · '
+                                    'Ж ${formatValue(scaledFacts.fat)} г · '
+                                    'У ${formatValue(scaledFacts.carbs)} г',
+                                    style: theme.textTheme.bodySmall,
+                                  ),
+                                ],
+                                const SizedBox(height: 12),
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: <Widget>[
+                                    if (isAdded)
+                                      Text(
+                                        'Добавлено в дневник',
+                                        style:
+                                            theme.textTheme.bodySmall?.copyWith(
+                                          color: theme.colorScheme.primary,
+                                        ),
+                                      ),
+                                    FilledButton.tonalIcon(
+                                      onPressed: _isAdding
+                                          ? null
+                                          : () {
+                                              if (entry != null) {
+                                                _removeEntry(entry);
+                                              } else {
+                                                _addFood(item);
+                                              }
+                                            },
+                                      icon: Icon(isAdded
+                                          ? Icons.delete_outline
+                                          : Icons.add),
+                                      label: Text(
+                                        isAdded ? 'Удалить' : 'Добавить',
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         );
                       },

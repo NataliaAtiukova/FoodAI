@@ -59,10 +59,11 @@ class DiaryService {
   Future<DiaryEntry> addEntry({
     required String name,
     String? brand,
-    required double calories,
-    required double protein,
-    required double fat,
-    required double carbs,
+    required double grams,
+    required double caloriesPer100g,
+    required double proteinPer100g,
+    required double fatPer100g,
+    required double carbsPer100g,
     required String goal,
     required String advice,
     required MealCategory category,
@@ -73,14 +74,17 @@ class DiaryService {
   }) async {
     _ensureInitialized();
 
+    final safeGrams = grams <= 0 ? 100.0 : grams;
+
     final entry = DiaryEntry(
       id: _uuid.v4(),
       name: name,
       brand: brand,
-      calories: calories,
-      protein: protein,
-      fat: fat,
-      carbs: carbs,
+      grams: safeGrams,
+      caloriesPer100g: caloriesPer100g,
+      proteinPer100g: proteinPer100g,
+      fatPer100g: fatPer100g,
+      carbsPer100g: carbsPer100g,
       timestamp: timestamp ?? DateTime.now(),
       goal: goal,
       advice: advice,
@@ -101,6 +105,14 @@ class DiaryService {
     _ensureInitialized();
     final entries = _entriesNotifier.value
         .map((entry) => entry.id == id ? entry.copyWith(note: note) : entry)
+        .toList();
+    await _setEntries(entries);
+  }
+
+  Future<void> updateGrams(String id, double grams) async {
+    _ensureInitialized();
+    final entries = _entriesNotifier.value
+        .map((entry) => entry.id == id ? entry.copyWith(grams: grams) : entry)
         .toList();
     await _setEntries(entries);
   }

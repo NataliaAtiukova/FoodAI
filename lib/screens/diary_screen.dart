@@ -222,6 +222,13 @@ class _DiaryEntryTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final timeText = timeFormat.format(entry.timestamp);
+    final wholeFormat = NumberFormat('#,##0');
+    final decimalFormat = NumberFormat('#,##0.0');
+
+    String format(double value) => value % 1 == 0
+        ? wholeFormat.format(value)
+        : decimalFormat.format(value);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -249,7 +256,7 @@ class _DiaryEntryTile extends StatelessWidget {
                   ],
                   const SizedBox(height: 4),
                   Text(
-                    '${entry.calories.toStringAsFixed(0)} ккал · $timeText',
+                    '${format(entry.calories)} ккал · ${format(entry.grams)} г · $timeText',
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 2),
@@ -259,11 +266,15 @@ class _DiaryEntryTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Б:${entry.protein.toStringAsFixed(0)}г · Ж:${entry.fat.toStringAsFixed(0)}г · У:${entry.carbs.toStringAsFixed(0)}г',
+                    'Б:${format(entry.protein)}г · Ж:${format(entry.fat)}г · У:${format(entry.carbs)}г',
                     style: theme.textTheme.labelMedium,
                   ),
                 ],
               ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.scale),
+              onPressed: () => _editGrams(context, entry),
             ),
             IconButton(
               icon: const Icon(Icons.edit_note_outlined),
@@ -348,6 +359,64 @@ class _DiaryEntryTile extends StatelessWidget {
     if (result != null) {
       await DiaryService.instance
           .updateNote(entry.id, result.isEmpty ? null : result);
+    }
+  }
+
+  Future<void> _editGrams(BuildContext context, DiaryEntry entry) async {
+    final controller = TextEditingController(
+      text: entry.grams % 1 == 0
+          ? entry.grams.toStringAsFixed(0)
+          : entry.grams.toStringAsFixed(1),
+    );
+    final result = await showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            top: 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                'Обновить граммовку',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  suffixText: 'г',
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () {
+                  final value =
+                      double.tryParse(controller.text.replaceAll(',', '.'));
+                  Navigator.of(context).pop(value);
+                },
+                child: const Text('Сохранить'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (result != null && result > 0) {
+      await DiaryService.instance.updateGrams(entry.id, result);
     }
   }
 }

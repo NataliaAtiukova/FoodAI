@@ -19,12 +19,16 @@ void main() {
 
     expect(find.text('FoodAI'), findsOneWidget);
 
+    await tester.tap(find.text('Search'));
+    await tester.pumpAndSettle();
+    expect(find.text('Поиск'), findsWidgets);
+
     await tester.tap(find.text('Diary'));
     await tester.pumpAndSettle();
     expect(find.text('Мой дневник'), findsWidgets);
 
-    await tester.tap(find.text('Progress'));
+    await tester.tap(find.text('Advice'));
     await tester.pumpAndSettle();
-    expect(find.text('Прогресс'), findsOneWidget);
+    expect(find.text('Советы по питанию'), findsOneWidget);
   });
 }
