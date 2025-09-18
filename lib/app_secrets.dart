@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
-/// Ensures the `.env` file is loaded before accessing secrets.
+/// Ensures that environment variables from `.env` are loaded before use.
 Future<void> ensureEnvLoaded() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (!dotenv.isInitialized) {
@@ -9,7 +9,7 @@ Future<void> ensureEnvLoaded() async {
   }
 }
 
-/// Reads an environment value or throws if it is missing.
+/// Reads a value from `.env` or throws if it is missing.
 String envOrThrow(String key) {
   final value = dotenv.env[key];
   if (value == null || value.isEmpty) {

@@ -1,6 +1,14 @@
 # FoodAI (NutriGo)
 
-FoodAI — Flutter-приложение, которое рассчитывает КБЖУ блюда через Nutritionix и подбирает рекомендацию по питанию от YandexGPT. Дополнительно можно распознать блюдо по фото с помощью Google Vision.
+FoodAI — Flutter-приложение, которое распознаёт блюда по фото, рассчитывает КБЖУ через Nutritionix и даёт советы от YandexGPT. Приложение хранит историю рациона в дневнике и показывает прогресс на наглядных графиках.
+
+## Возможности
+
+- Ввод блюда вручную, сканирование камерой или выбор фото из галереи (Google Cloud Vision).
+- Автоматический расчёт калорий, белков, жиров и углеводов (Nutritionix).
+- Советы по питанию от YandexGPT с учётом цели: Похудение, Набор мышц, ЗОЖ или Спорт.
+- Сохранение блюд в дневник с категориями (завтрак, обед, ужин, перекус), заметками и фото.
+- Дневные итоги и прогресс: график калорий за неделю и распределение БЖУ за день.
 
 ## Быстрый старт
 
@@ -9,77 +17,37 @@ flutter pub get
 flutter run
 ```
 
-Перед запуском создайте `.env` (см. пример ниже) и положите ключ Google Vision по пути `assets/keys/zinc-night-453821-n5-f79b987f7522.json`.
-
-### Конфигурация `.env`
+Перед запуском создайте `.env` в корне проекта и добавьте ключи сервисов:
 
 ```dotenv
-YANDEX_API_KEY=YOUR_YANDEX_API_KEY
-YANDEX_FOLDER_ID=YOUR_YANDEX_FOLDER_ID
 NUTRITIONIX_APP_ID=YOUR_NUTRITIONIX_APP_ID
 NUTRITIONIX_APP_KEY=YOUR_NUTRITIONIX_APP_KEY
+YANDEX_API_KEY=YOUR_YANDEX_GPT_API_KEY
+YANDEX_FOLDER_ID=YOUR_YANDEX_FOLDER_ID
+GOOGLE_VISION_KEY_PATH=assets/keys/vision_key.json
 ```
 
-## Пример запроса к YandexGPT
+Скопируйте JSON сервисного аккаунта Google Vision в `assets/keys/vision_key.json` (папка уже в `.gitignore`).
 
-```http
-POST https://llm.api.cloud.yandex.net/foundationModels/v1/completion
-Authorization: Api-Key YOUR_YANDEX_API_KEY
-x-folder-id: YOUR_YANDEX_FOLDER_ID
-Content-Type: application/json
+## Архитектура
 
-{
-  "modelUri": "gpt://YOUR_YANDEX_FOLDER_ID/yandexgpt/latest",
-  "completionOptions": {
-    "stream": false,
-    "temperature": 0.4,
-    "maxTokens": 200
-  },
-  "messages": [
-    {
-      "role": "user",
-      "text": "Ты — нутрициолог. Пользователь съел блюдо: Калории: 350 Белки: 25 г Жиры: 10 г Углеводы: 40 г Цель: похудение Дай короткий совет, подходит ли блюдо, и предложи альтернативу, если нужно."
-    }
-  ]
-}
+- `lib/services/vision_service.dart` — классификация изображений через Google Cloud Vision.
+- `lib/services/nutrition_service.dart` — Nutritionix + советы YandexGPT.
+- `lib/services/diary_service.dart` — хранение в Hive, агрегаты по дням.
+- UI разбит на вкладки (`Home`, `Diary`, `Progress`) и экран результатов `ResultsScreen`.
+
+## Полезные команды
+
+```bash
+# Проверка стиля
+flutter analyze
+
+# Запуск тестов
+flutter test
 ```
 
-### Пример успешного ответа
+## Отладка интеграций
 
-```json
-{
-  "result": {
-    "alternatives": [
-      {
-        "message": {
-          "role": "assistant",
-          "text": "Блюдо подходит для похудения: умеренная калорийность и хороший баланс белков. Если хочешь облегчить его, замени часть углеводов на свежие овощи или салат."
-        },
-        "status": "ALTERNATIVE_STATUS_FINAL"
-      }
-    ],
-    "usage": {
-      "inputTextTokensCount": 74,
-      "outputTextTokensCount": 42
-    }
-  }
-}
-```
-
-## Вызов `getDietAdvice` в коде
-
-Во время расчёта приложение передаёт данные о блюде и цель "Похудение" (строка `"похудение"` в API):
-
-```dart
-final advice = await getDietAdvice(
-  {
-    'calories': info.calories,
-    'protein': info.protein,
-    'fat': info.fat,
-    'carbs': info.carbohydrates,
-  },
-  'похудение',
-);
-```
-
-Тот же вызов используется в `lib/main.dart`, когда пользователь выбирает цель.
+- **Google Vision** — убедитесь, что billing включён в проекте Google Cloud и ключ имеет доступ к Vision API.
+- **Nutritionix** — используйте Application ID и Key из `.env` и следите за лимитами запросов.
+- **YandexGPT** — проверьте, что сервис включён в каталоге `b1gggscveki4khab1snj` и ключ активен.

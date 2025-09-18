@@ -1,399 +1,141 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
-import 'ai_service.dart';
 import 'app_secrets.dart';
-import 'nutrition_service.dart';
-import 'vision_service.dart';
+import 'screens/diary_screen.dart';
+import 'screens/home_screen.dart';
+import 'screens/progress_screen.dart';
+import 'services/diary_service.dart';
 
 Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   await ensureEnvLoaded();
-  runApp(const MyApp());
+  await DiaryService.instance.init();
+  runApp(const FoodAiApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class FoodAiApp extends StatefulWidget {
+  const FoodAiApp({super.key});
+
+  @override
+  State<FoodAiApp> createState() => _FoodAiAppState();
+}
+
+class _FoodAiAppState extends State<FoodAiApp> {
+  int _currentIndex = 0;
+  final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
 
   @override
   Widget build(BuildContext context) {
+    final tabs = <Widget>[
+      HomeScreen(key: _homeKey),
+      DiaryScreen(onAddFood: _onAddFood),
+      const ProgressScreen(),
+    ];
+
     return MaterialApp(
       title: 'FoodAI',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.green,
-          brightness: Brightness.light,
-          primary: Colors.green,
-          secondary: Colors.greenAccent,
-        ),
-        scaffoldBackgroundColor: Colors.white,
         useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
+        scaffoldBackgroundColor: Colors.white,
+        snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
       ),
-      home: const MyHomePage(),
+      home: Scaffold(
+        appBar: AppBar(
+          title: Text(_titleForIndex(_currentIndex)),
+          centerTitle: true,
+        ),
+        body: IndexedStack(
+          index: _currentIndex,
+          children: tabs,
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          selectedItemColor: Theme.of(context).colorScheme.primary,
+          onTap: (index) => setState(() => _currentIndex = index),
+          items: const <BottomNavigationBarItem>[
+            BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.book_outlined), label: 'Diary'),
+            BottomNavigationBarItem(icon: Icon(Icons.show_chart_outlined), label: 'Progress'),
+          ],
+        ),
+      ),
     );
   }
-}
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key});
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  static const Map<String, String> _goalOptions = <String, String>{
-    'Похудение': 'похудение',
-    'Набор массы': 'набор массы',
-    'ПП': 'правильное питание',
-    'Спорт': 'спорт',
-  };
-
-  final TextEditingController _controller = TextEditingController();
-  final ImagePicker _imagePicker = ImagePicker();
-  String _selectedGoal = _goalOptions.values.first;
-  NutritionInfo? _nutritionInfo;
-  String? _advice;
-  File? _selectedImage;
-  String? _recognizedDish;
-  bool _isLoading = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _calculate() async {
-    final query = _controller.text.trim();
-    if (query.isEmpty) {
-      _showSnackBar('Введите название блюда.');
-      return;
-    }
-    await _processQuery(query);
-  }
-
-  Future<void> _processQuery(String query) async {
-    setState(() {
-      _isLoading = true;
-      _nutritionInfo = null;
-      _advice = null;
-    });
-
-    try {
-      final info = await getNutrition(query);
-      final advice = await getDietAdvice(
-        <String, dynamic>{
-          'calories': info.calories,
-          'protein': info.protein,
-          'fat': info.fat,
-          'carbs': info.carbohydrates,
-        },
-        _selectedGoal,
-      );
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _nutritionInfo = info;
-        _advice = advice;
-      });
-    } on NutritionException catch (e) {
-      _showSnackBar(e.message);
-    } on DietAdviceException catch (e) {
-      _showSnackBar(e.message);
-    } on StateError catch (e) {
-      _showSnackBar(e.message);
-    } catch (e) {
-      _showSnackBar('Что-то пошло не так: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+  String _titleForIndex(int index) {
+    switch (index) {
+      case 0:
+        return 'FoodAI';
+      case 1:
+        return 'Мой дневник';
+      case 2:
+        return 'Прогресс';
+      default:
+        return 'FoodAI';
     }
   }
 
-  Future<void> _scanPhoto() async {
-    try {
-      final XFile? pickedFile =
-          await _imagePicker.pickImage(source: ImageSource.gallery);
-      if (pickedFile == null) {
-        return;
-      }
-
-      final file = File(pickedFile.path);
-
-      setState(() {
-        _isLoading = true;
-        _selectedImage = file;
-        _recognizedDish = null;
-        _nutritionInfo = null;
-        _advice = null;
-      });
-
-      final dishName = await analyzeImage(file);
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _recognizedDish = dishName;
-        _controller.text = dishName;
-      });
-
-      await _processQuery(dishName);
-    } on VisionException catch (e) {
-      _showSnackBar(e.message);
-    } on NutritionException catch (e) {
-      _showSnackBar(e.message);
-    } on DietAdviceException catch (e) {
-      _showSnackBar(e.message);
-    } on StateError catch (e) {
-      _showSnackBar(e.message);
-    } catch (e) {
-      _showSnackBar('Не удалось обработать фото: $e');
-    } finally {
-      if (mounted && _isLoading) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  void _showSnackBar(String message) {
+  Future<void> _onAddFood() async {
     if (!mounted) {
       return;
     }
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-  }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('FoodAI Нутриценты'),
-        backgroundColor: theme.colorScheme.primary,
-        foregroundColor: Colors.white,
+    final action = await showModalBottomSheet<_AddFoodAction>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+      builder: (context) {
+        return SafeArea(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              TextField(
-                controller: _controller,
-                decoration: const InputDecoration(
-                  labelText: 'Введите блюдо',
-                  border: OutlineInputBorder(),
-                ),
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _calculate(),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Ввести вручную'),
+                onTap: () => Navigator.of(context).pop(_AddFoodAction.manual),
               ),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<String>(
-                value: _selectedGoal,
-                decoration: const InputDecoration(
-                  labelText: 'Цель',
-                  border: OutlineInputBorder(),
-                ),
-                items: _goalOptions.entries
-                    .map(
-                      (entry) => DropdownMenuItem<String>(
-                        value: entry.value,
-                        child: Text(entry.key),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null) {
-                    return;
-                  }
-                  setState(() {
-                    _selectedGoal = value;
-                  });
-                },
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: const Text('Сканировать камерой'),
+                onTap: () => Navigator.of(context).pop(_AddFoodAction.camera),
               ),
-              const SizedBox(height: 24),
-              SizedBox(
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _calculate,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: theme.colorScheme.primary,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Colors.white,
-                            ),
-                          ),
-                        )
-                      : const Text('Посчитать'),
-                ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Выбрать фото'),
+                onTap: () => Navigator.of(context).pop(_AddFoodAction.gallery),
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 48,
-                child: OutlinedButton(
-                  onPressed: _isLoading ? null : _scanPhoto,
-                  child: const Text('📸 Сканировать фото'),
-                ),
-              ),
-              const SizedBox(height: 24),
-              if (_selectedImage != null)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        _selectedImage!,
-                        height: 200,
-                        fit: BoxFit.cover,
-                      ),
-                    ),
-                    if (_recognizedDish != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          'Распознано: $_recognizedDish',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: theme.colorScheme.primary,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 24),
-                  ],
-                ),
-              if (_nutritionInfo != null)
-                Card(
-                  elevation: 3,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          'Пищевая ценность',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        _NutritionRow(
-                          label: 'Калории',
-                          value:
-                              '${_nutritionInfo!.calories.toStringAsFixed(1)} ккал',
-                        ),
-                        _NutritionRow(
-                          label: 'Белки',
-                          value:
-                              '${_nutritionInfo!.protein.toStringAsFixed(1)} г',
-                        ),
-                        _NutritionRow(
-                          label: 'Жиры',
-                          value: '${_nutritionInfo!.fat.toStringAsFixed(1)} г',
-                        ),
-                        _NutritionRow(
-                          label: 'Углеводы',
-                          value:
-                              '${_nutritionInfo!.carbohydrates.toStringAsFixed(1)} г',
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (_advice != null)
-                Card(
-                  elevation: 3,
-                  margin: const EdgeInsets.only(top: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          'Совет нутрициолога',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: theme.colorScheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          _advice!,
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
             ],
           ),
-        ),
-      ),
+        );
+      },
     );
+
+    if (action == null) {
+      return;
+    }
+
+    void switchToHome(VoidCallback? callback) {
+      setState(() => _currentIndex = 0);
+      if (callback != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => callback());
+      }
+    }
+
+    switch (action) {
+      case _AddFoodAction.manual:
+        switchToHome(null);
+        break;
+      case _AddFoodAction.camera:
+        switchToHome(() => _homeKey.currentState?.startCameraScan());
+        break;
+      case _AddFoodAction.gallery:
+        switchToHome(() => _homeKey.currentState?.startGalleryPick());
+        break;
+    }
   }
 }
 
-class _NutritionRow extends StatelessWidget {
-  const _NutritionRow({
-    required this.label,
-    required this.value,
-  });
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: <Widget>[
-          Text(
-            label,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          Text(
-            value,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+enum _AddFoodAction { manual, camera, gallery }
