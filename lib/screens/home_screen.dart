@@ -94,18 +94,38 @@ class HomeScreenState extends State<HomeScreen> {
           padding: const EdgeInsets.all(20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               const Text(
-                'Не удалось распознать блюдо. Добавьте его вручную.',
+                'Не удалось распознать блюдо. Выберите способ добавления:',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
-              FilledButton(
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  widget.onNavigateToTab?.call(2);
+                },
+                icon: const Icon(Icons.search_outlined),
+                label: const Text('Поиск (Open Food Facts)'),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
                 onPressed: () {
                   Navigator.of(context).pop();
                   widget.onNavigateToTab?.call(3);
                 },
-                child: const Text('Открыть ручной ввод'),
+                icon: const Icon(Icons.restaurant_menu),
+                label: const Text('Список русских блюд'),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  widget.onNavigateToTab?.call(4);
+                },
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Добавить свой продукт'),
               ),
             ],
           ),
@@ -189,6 +209,7 @@ class HomeScreenState extends State<HomeScreen> {
           ),
         ),
       );
+      _pendingSource = 'Ручной ввод';
     } on NutritionException catch (e) {
       _showSnackBar(e.message);
     } on DietAdviceException catch (e) {

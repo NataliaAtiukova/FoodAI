@@ -138,23 +138,60 @@ class _SearchScreenState extends State<SearchScreen> {
       return;
     }
 
+    NutritionAnalysis? analysis;
+    NutritionFacts? facts;
+    double grams = 100;
+
+    if (item.factsPer100g != null) {
+      final value = await _askPortion(item.name);
+      if (value == null) {
+        return;
+      }
+      grams = value;
+      final ratio = grams / 100;
+      facts = NutritionFacts(
+        calories: item.factsPer100g!.calories * ratio,
+        protein: item.factsPer100g!.protein * ratio,
+        fat: item.factsPer100g!.fat * ratio,
+        carbs: item.factsPer100g!.carbs * ratio,
+      );
+    }
+
     setState(() => _isAdding = true);
     try {
-      final analysis = await NutritionService.instance.analyzeWithAdvice(
-        item.name,
-        _selectedGoal,
-      );
-      final facts = analysis.result.facts;
+      String advice;
+      String name;
+      if (facts != null) {
+        name = item.name;
+        try {
+          advice = await NutritionService.instance.fetchDietAdvice(
+            facts,
+            _selectedGoal,
+            productName: item.name,
+          );
+        } catch (_) {
+          advice = 'Добавлено из поиска OFF.';
+        }
+      } else {
+        analysis = await NutritionService.instance.analyzeWithAdvice(
+          item.name,
+          _selectedGoal,
+        );
+        facts = analysis.result.facts;
+        name = analysis.result.name;
+        advice = analysis.advice;
+      }
+
       await DiaryService.instance.addEntry(
-        name: analysis.result.name,
+        name: name,
         calories: facts.calories,
         protein: facts.protein,
         fat: facts.fat,
         carbs: facts.carbs,
         goal: _selectedGoal.label,
-        advice: analysis.advice,
+        advice: advice,
         category: category,
-        source: 'Поиск',
+        source: 'Поиск OFF',
       );
       if (!mounted) {
         return;

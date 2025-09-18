@@ -4,6 +4,7 @@ import 'app_secrets.dart';
 import 'screens/diary_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/manual_screen.dart';
+import 'screens/my_product_screen.dart';
 import 'screens/progress_screen.dart';
 import 'screens/search_screen.dart';
 import 'services/diary_service.dart';
@@ -33,6 +34,7 @@ class _FoodAiAppState extends State<FoodAiApp> {
       DiaryScreen(onAddFood: _onAddFood),
       const SearchScreen(),
       const ManualScreen(),
+      const MyProductScreen(),
       const ProgressScreen(),
     ];
 
@@ -61,7 +63,8 @@ class _FoodAiAppState extends State<FoodAiApp> {
             BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
             BottomNavigationBarItem(icon: Icon(Icons.book_outlined), label: 'Diary'),
             BottomNavigationBarItem(icon: Icon(Icons.search_outlined), label: 'Search'),
-            BottomNavigationBarItem(icon: Icon(Icons.edit_outlined), label: 'Manual'),
+            BottomNavigationBarItem(icon: Icon(Icons.restaurant_menu), label: 'Блюда'),
+            BottomNavigationBarItem(icon: Icon(Icons.edit_outlined), label: 'Мой продукт'),
             BottomNavigationBarItem(icon: Icon(Icons.show_chart_outlined), label: 'Progress'),
           ],
         ),
@@ -78,8 +81,10 @@ class _FoodAiAppState extends State<FoodAiApp> {
       case 2:
         return 'Поиск';
       case 3:
-        return 'Ручной ввод';
+        return 'Русские блюда';
       case 4:
+        return 'Мой продукт';
+      case 5:
         return 'Прогресс';
       default:
         return 'FoodAI';
@@ -107,8 +112,18 @@ class _FoodAiAppState extends State<FoodAiApp> {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               ListTile(
+                leading: const Icon(Icons.search_outlined),
+                title: const Text('Поиск по базе'),
+                onTap: () => Navigator.of(context).pop(_AddFoodAction.search),
+              ),
+              ListTile(
+                leading: const Icon(Icons.restaurant_menu),
+                title: const Text('Популярные блюда'),
+                onTap: () => Navigator.of(context).pop(_AddFoodAction.dishes),
+              ),
+              ListTile(
                 leading: const Icon(Icons.edit_outlined),
-                title: const Text('Ввести вручную'),
+                title: const Text('Мой продукт'),
                 onTap: () => Navigator.of(context).pop(_AddFoodAction.manual),
               ),
               ListTile(
@@ -139,8 +154,14 @@ class _FoodAiAppState extends State<FoodAiApp> {
     }
 
     switch (action) {
-      case _AddFoodAction.manual:
+      case _AddFoodAction.search:
+        _setCurrentIndex(2);
+        break;
+      case _AddFoodAction.dishes:
         _setCurrentIndex(3);
+        break;
+      case _AddFoodAction.manual:
+        _setCurrentIndex(4);
         break;
       case _AddFoodAction.camera:
         switchToHome(() => _homeKey.currentState?.startCameraScan());
@@ -152,4 +173,4 @@ class _FoodAiAppState extends State<FoodAiApp> {
   }
 }
 
-enum _AddFoodAction { manual, camera, gallery }
+enum _AddFoodAction { search, dishes, manual, camera, gallery }

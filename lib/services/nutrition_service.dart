@@ -29,8 +29,6 @@ class NutritionService {
 
   static final Uri _nutritionixUri =
       Uri.parse('https://trackapi.nutritionix.com/v2/natural/nutrients');
-  static final Uri _nutritionixSearchUri =
-      Uri.parse('https://trackapi.nutritionix.com/v2/search/instant');
   static const String _openFoodFactsEndpoint =
       'https://world.openfoodfacts.org/api/v0/product/';
   static final Uri _yandexUri = Uri.parse(
@@ -110,53 +108,78 @@ class NutritionService {
       return const <SearchFoodItem>[];
     }
 
-    final appId = envOrThrow('NUTRITIONIX_APP_ID');
-    final appKey = envOrThrow('NUTRITIONIX_APP_KEY');
+    final uri = Uri.parse(
+      'https://ru.openfoodfacts.org/cgi/search.pl',
+    ).replace(queryParameters: <String, String>{
+      'search_terms': trimmed,
+      'search_simple': '1',
+      'action': 'process',
+      'json': '1',
+      'page_size': '20',
+    });
 
-    final response = await http.get(
-      _nutritionixSearchUri.replace(queryParameters: <String, String>{
-        'query': trimmed,
-        'detailed': 'true',
-      }),
-      headers: <String, String>{
-        'x-app-id': appId,
-        'x-app-key': appKey,
-      },
-    );
-
+    final response = await http.get(uri);
     if (response.statusCode != 200) {
       return const <SearchFoodItem>[];
     }
 
     final Map<String, dynamic> payload = jsonDecode(response.body);
-    final List<SearchFoodItem> results = <SearchFoodItem>[];
-
-    void parseList(dynamic list) {
-      if (list is List) {
-        for (final item in list) {
-          if (item is Map<String, dynamic>) {
-            final name = (item['food_name'] as String?)?.trim();
-            if (name == null || name.isEmpty) {
-              continue;
-            }
-            final brand = (item['brand_name'] as String?)?.trim();
-            String? thumb;
-            final photo = item['photo'];
-            if (photo is Map<String, dynamic>) {
-              thumb = (photo['thumb'] as String?)?.trim();
-            }
-            results.add(
-              SearchFoodItem(name: name, brand: brand, thumbnailUrl: thumb),
-            );
-          }
-        }
-      }
+    final products = payload['products'];
+    if (products is! List) {
+      return const <SearchFoodItem>[];
     }
 
-    parseList(payload['common']);
-    parseList(payload['branded']);
+    final List<SearchFoodItem> items = <SearchFoodItem>[];
+    for (final product in products) {
+      if (product is! Map<String, dynamic>) {
+        continue;
+      }
+      final name = (product['product_name_ru'] as String?)?.trim() ??
+          (product['product_name'] as String?)?.trim();
+      if (name == null || name.isEmpty) {
+        continue;
+      }
+      final String? brand = (product['brands'] as String?)?.split(',').first.trim();
+      final nutriments = product['nutriments'];
+      NutritionFacts? facts;
+      if (nutriments is Map<String, dynamic>) {
+        double? read(String key) {
+          final value = nutriments[key];
+          if (value is num) {
+            return value.toDouble();
+          }
+          if (value is String) {
+            return double.tryParse(value);
+          }
+          return null;
+        }
 
-    return results;
+        final calories = read('energy-kcal_100g');
+        final protein = read('proteins_100g');
+        final fat = read('fat_100g');
+        final carbs = read('carbohydrates_100g');
+
+        if (calories != null && protein != null && fat != null && carbs != null) {
+          facts = NutritionFacts(
+            calories: calories,
+            protein: protein,
+            fat: fat,
+            carbs: carbs,
+          );
+        }
+      }
+
+      items.add(
+        SearchFoodItem(
+          name: name,
+          brand: brand,
+          thumbnailUrl: (product['image_thumb_url'] as String?)?.trim(),
+          factsPer100g: facts,
+        ),
+      );
+    }
+
+    return items;
   }
 
   Future<NutritionResult?> fetchFoodByBarcode(String barcode) async {
