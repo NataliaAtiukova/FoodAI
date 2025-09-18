@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../models/meal_category.dart';
 import '../models/nutrition_models.dart';
 import '../models/vision_prediction.dart';
+import '../services/diary_service.dart';
 import '../services/nutrition_service.dart';
 import '../services/vision_service.dart';
-import 'results_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, this.onNavigateToTab});
@@ -28,6 +29,8 @@ class HomeScreenState extends State<HomeScreen> {
   String? _lastImagePath;
   bool _isLoading = false;
   String _pendingSource = 'Ручной ввод';
+  bool _savingToDiary = false;
+  String _lastAnalysisSource = 'Ручной ввод';
 
   @override
   void dispose() {
@@ -79,6 +82,101 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _addAnalysisToDiary() async {
+    final analysis = _latestAnalysis;
+    if (analysis == null || _savingToDiary) {
+      return;
+    }
+
+    final category = await _pickCategory();
+    if (category == null || !mounted) {
+      return;
+    }
+
+    setState(() => _savingToDiary = true);
+    try {
+      final facts = analysis.result.facts;
+      await DiaryService.instance.addEntry(
+        name: analysis.result.name,
+        brand: analysis.result.brand,
+        calories: facts.calories,
+        protein: facts.protein,
+        fat: facts.fat,
+        carbs: facts.carbs,
+        goal: _selectedGoal.label,
+        advice: analysis.advice,
+        category: category,
+        source: 'Home',
+        imagePath: _lastImagePath,
+        labels: _latestPredictions
+            ?.map((prediction) =>
+                '${prediction.label} (${prediction.confidencePercent()})')
+            .toList(),
+      );
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Добавлено в дневник.')),
+        );
+    } catch (error) {
+      _showSnackBar('Не удалось сохранить: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _savingToDiary = false);
+      }
+    }
+  }
+
+  Future<MealCategory?> _pickCategory() async {
+    MealCategory selected = MealCategory.breakfast;
+    return showModalBottomSheet<MealCategory>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    'Категория приёма пищи',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  ...MealCategory.values.map(
+                    (category) => RadioListTile<MealCategory>(
+                      value: category,
+                      groupValue: selected,
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => selected = value);
+                        }
+                      },
+                      title: Text(category.displayName),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => Navigator.of(context).pop(selected),
+                    child: const Text('Добавить'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _offerManualFallback() async {
     if (!mounted) {
       return;
@@ -97,7 +195,7 @@ class HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               const Text(
-                'Не удалось распознать блюдо. Выберите способ добавления:',
+                'Не удалось распознать блюдо. Попробуйте добавить его через поиск Open Food Facts.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
@@ -107,25 +205,7 @@ class HomeScreenState extends State<HomeScreen> {
                   widget.onNavigateToTab?.call(2);
                 },
                 icon: const Icon(Icons.search_outlined),
-                label: const Text('Поиск (Open Food Facts)'),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  widget.onNavigateToTab?.call(3);
-                },
-                icon: const Icon(Icons.restaurant_menu),
-                label: const Text('Список русских блюд'),
-              ),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  widget.onNavigateToTab?.call(4);
-                },
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Добавить свой продукт'),
+                label: const Text('Перейти к поиску'),
               ),
             ],
           ),
@@ -134,7 +214,8 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<String?> _showPredictionSheet(List<VisionPrediction> predictions) async {
+  Future<String?> _showPredictionSheet(
+      List<VisionPrediction> predictions) async {
     if (predictions.isEmpty) {
       return null;
     }
@@ -181,6 +262,10 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isLoading = true;
       _latestAnalysis = null;
+      if (source != null && source == 'Ручной ввод') {
+        _latestPredictions = null;
+        _lastImagePath = null;
+      }
     });
 
     if (source != null) {
@@ -196,19 +281,10 @@ class HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      setState(() => _latestAnalysis = analysis);
-
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (context) => ResultsScreen(
-            analysis: analysis,
-            goal: _selectedGoal,
-            predictions: _latestPredictions,
-            imagePath: _lastImagePath,
-            source: _pendingSource,
-          ),
-        ),
-      );
+      setState(() {
+        _latestAnalysis = analysis;
+        _lastAnalysisSource = _pendingSource;
+      });
       _pendingSource = 'Ручной ввод';
     } on NutritionException catch (e) {
       _showSnackBar(e.message);
@@ -314,7 +390,8 @@ class HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 24),
             FilledButton(
-              onPressed: _isLoading ? null : () => _calculate(source: 'Ручной ввод'),
+              onPressed:
+                  _isLoading ? null : () => _calculate(source: 'Ручной ввод'),
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
@@ -332,7 +409,7 @@ class HomeScreenState extends State<HomeScreen> {
             if (_latestAnalysis != null) ...<Widget>[
               const SizedBox(height: 24),
               Text(
-                'Сегодняшняя сводка',
+                'Результат анализа',
                 style: theme.textTheme.titleMedium,
               ),
               const SizedBox(height: 12),
@@ -341,6 +418,21 @@ class HomeScreenState extends State<HomeScreen> {
                 imagePath: _lastImagePath,
                 predictions: _latestPredictions,
                 numberFormat: numberFormat,
+                sourceLabel: _lastAnalysisSource,
+                goalLabel: _selectedGoal.displayName,
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _savingToDiary ? null : _addAnalysisToDiary,
+                icon: _savingToDiary
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      )
+                    : const Icon(Icons.add_task),
+                label:
+                    Text(_savingToDiary ? 'Добавление…' : 'Добавить в дневник'),
               ),
             ],
           ],
@@ -356,12 +448,16 @@ class _SummaryCard extends StatelessWidget {
     required this.imagePath,
     required this.predictions,
     required this.numberFormat,
+    required this.sourceLabel,
+    required this.goalLabel,
   });
 
   final NutritionAnalysis analysis;
   final String? imagePath;
   final List<VisionPrediction>? predictions;
   final NumberFormat numberFormat;
+  final String sourceLabel;
+  final String goalLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -376,7 +472,21 @@ class _SummaryCard extends StatelessWidget {
           children: <Widget>[
             Text(
               analysis.result.name,
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            if (analysis.result.brand != null &&
+                analysis.result.brand!.isNotEmpty) ...<Widget>[
+              const SizedBox(height: 6),
+              Text(
+                analysis.result.brand!,
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 8),
+            Text(
+              'Источник: $sourceLabel · Цель: $goalLabel',
+              style: theme.textTheme.bodySmall,
             ),
             if (imagePath != null && File(imagePath!).existsSync()) ...<Widget>[
               const SizedBox(height: 12),
@@ -394,10 +504,22 @@ class _SummaryCard extends StatelessWidget {
               spacing: 12,
               runSpacing: 12,
               children: <Widget>[
-                _SummaryMetric(title: 'Калории', value: '${numberFormat.format(analysis.result.facts.calories)} ккал'),
-                _SummaryMetric(title: 'Белки', value: '${numberFormat.format(analysis.result.facts.protein)} г'),
-                _SummaryMetric(title: 'Жиры', value: '${numberFormat.format(analysis.result.facts.fat)} г'),
-                _SummaryMetric(title: 'Углеводы', value: '${numberFormat.format(analysis.result.facts.carbs)} г'),
+                _SummaryMetric(
+                    title: 'Калории',
+                    value:
+                        '${numberFormat.format(analysis.result.facts.calories)} ккал'),
+                _SummaryMetric(
+                    title: 'Белки',
+                    value:
+                        '${numberFormat.format(analysis.result.facts.protein)} г'),
+                _SummaryMetric(
+                    title: 'Жиры',
+                    value:
+                        '${numberFormat.format(analysis.result.facts.fat)} г'),
+                _SummaryMetric(
+                    title: 'Углеводы',
+                    value:
+                        '${numberFormat.format(analysis.result.facts.carbs)} г'),
               ],
             ),
             if (predictions != null && predictions!.isNotEmpty) ...<Widget>[
@@ -418,6 +540,45 @@ class _SummaryCard extends StatelessWidget {
                     .toList(),
               ),
             ],
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color:
+                    theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      CircleAvatar(
+                        backgroundColor: theme.colorScheme.primary,
+                        radius: 16,
+                        child: Icon(
+                          Icons.bolt,
+                          size: 18,
+                          color: theme.colorScheme.onPrimary,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Совет FoodAI',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    analysis.advice,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -448,7 +609,8 @@ class _SummaryMetric extends StatelessWidget {
           const SizedBox(height: 6),
           Text(
             value,
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.bold),
           ),
         ],
       ),

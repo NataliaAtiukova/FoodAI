@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'package:hive_flutter/hive_flutter.dart';
-
 import '../models/diary_entry.dart';
 import '../models/meal_category.dart';
 import '../models/nutrition_models.dart';
@@ -66,7 +64,8 @@ class _SearchScreenState extends State<SearchScreen> {
 
     setState(() => _isBarcodeLoading = true);
     try {
-      final result = await NutritionService.instance.fetchFoodByBarcode(barcode);
+      final result =
+          await NutritionService.instance.fetchFoodByBarcode(barcode);
       if (!mounted) {
         return;
       }
@@ -116,7 +115,7 @@ class _SearchScreenState extends State<SearchScreen> {
           goal: _selectedGoal.label,
           advice: advice,
           category: category,
-          source: 'Штрихкод',
+          source: 'Search',
         );
         if (!mounted) {
           return;
@@ -196,7 +195,7 @@ class _SearchScreenState extends State<SearchScreen> {
         goal: _selectedGoal.label,
         advice: advice,
         category: category,
-        source: 'Поиск OFF',
+        source: 'Search',
       );
       if (!mounted) {
         return;
@@ -243,7 +242,8 @@ class _SearchScreenState extends State<SearchScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: controller,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   suffixText: 'г',
@@ -252,7 +252,8 @@ class _SearchScreenState extends State<SearchScreen> {
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: () {
-                  final value = double.tryParse(controller.text.replaceAll(',', '.'));
+                  final value =
+                      double.tryParse(controller.text.replaceAll(',', '.'));
                   Navigator.of(context).pop(value);
                 },
                 child: const Text('Продолжить'),
@@ -311,10 +312,13 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
-  DiaryEntry? _findMatchingEntry(List<DiaryEntry> entries, SearchFoodItem item) {
+  DiaryEntry? _findMatchingEntry(
+      List<DiaryEntry> entries, SearchFoodItem item) {
     for (final entry in entries) {
       final sameName = entry.name.toLowerCase() == item.name.toLowerCase();
-      final sourceMatches = entry.source.toLowerCase().contains('поиск');
+      final sourceLower = entry.source.toLowerCase();
+      final sourceMatches =
+          sourceLower.contains('search') || sourceLower.contains('поиск');
       final brandMatches = (item.brand == null || item.brand!.isEmpty)
           ? (entry.brand == null || entry.brand!.isEmpty)
           : (entry.brand?.toLowerCase() == item.brand!.toLowerCase());
@@ -345,7 +349,8 @@ class _SearchScreenState extends State<SearchScreen> {
           children: <Widget>[
             Text(
               'Поиск блюд',
-              style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -426,42 +431,90 @@ class _SearchScreenState extends State<SearchScreen> {
               )
             else
               Expanded(
-                child: ValueListenableBuilder<Box<DiaryEntry>>(
+                child: ValueListenableBuilder<List<DiaryEntry>>(
                   valueListenable: DiaryService.instance.listenable(),
-                  builder: (context, box, _) {
-                    final entries = box.values.toList();
+                  builder: (context, entries, _) {
                     return ListView.separated(
                       itemCount: _results.length,
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final item = _results[index];
-                    final entry = _findMatchingEntry(entries, item);
-                    return ListTile(
-                      leading: item.thumbnailUrl != null
-                          ? CircleAvatar(backgroundImage: NetworkImage(item.thumbnailUrl!))
-                          : const CircleAvatar(child: Icon(Icons.restaurant_outlined)),
-                      title: Text(item.name),
-                      subtitle: item.brand == null || item.brand!.isEmpty
-                          ? null
-                          : Text(item.brand!),
-                      trailing: entry != null
-                          ? OutlinedButton(
-                              onPressed: () => DiaryService.instance.deleteEntry(entry.id),
-                              child: const Text('Убрать'),
-                            )
-                          : FilledButton.tonal(
-                              onPressed: _isAdding ? null : () => _addFood(item),
-                              child: const Text('Добавить'),
+                        final entry = _findMatchingEntry(entries, item);
+                        final added = entry != null;
+                        final theme = Theme.of(context);
+                        final subtitleChildren = <Widget>[];
+                        if (item.brand != null && item.brand!.isNotEmpty) {
+                          subtitleChildren.add(Text(item.brand!));
+                        }
+                        if (added) {
+                          subtitleChildren.add(
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                'Добавлено',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
                             ),
+                          );
+                        }
+
+                        return ListTile(
+                          leading: item.thumbnailUrl != null
+                              ? CircleAvatar(
+                                  backgroundImage:
+                                      NetworkImage(item.thumbnailUrl!))
+                              : const CircleAvatar(
+                                  child: Icon(Icons.restaurant_outlined)),
+                          title: Text(item.name),
+                          subtitle: subtitleChildren.isEmpty
+                              ? null
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: subtitleChildren,
+                                ),
+                          trailing: FilledButton.tonalIcon(
+                            onPressed: _isAdding
+                                ? null
+                                : () {
+                                    if (added) {
+                                      _removeEntry(entry);
+                                    } else {
+                                      _addFood(item);
+                                    }
+                                  },
+                            icon:
+                                Icon(added ? Icons.delete_outline : Icons.add),
+                            label: Text(added ? 'Удалить' : 'Добавить'),
+                          ),
+                        );
+                      },
                     );
                   },
-                );
-              },
-            ),
+                ),
               ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _removeEntry(DiaryEntry entry) async {
+    setState(() => _isAdding = true);
+    try {
+      await DiaryService.instance.deleteEntry(entry.id);
+      if (!mounted) {
+        return;
+      }
+      _showSnackBar('Удалено из дневника');
+    } catch (error) {
+      _showSnackBar('Не удалось удалить: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isAdding = false);
+      }
+    }
   }
 }

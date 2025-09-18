@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../models/diary_entry.dart';
@@ -9,9 +8,7 @@ import '../models/meal_category.dart';
 import '../services/diary_service.dart';
 
 class DiaryScreen extends StatefulWidget {
-  const DiaryScreen({super.key, required this.onAddFood});
-
-  final VoidCallback onAddFood;
+  const DiaryScreen({super.key});
 
   @override
   State<DiaryScreen> createState() => _DiaryScreenState();
@@ -29,10 +26,11 @@ class _DiaryScreenState extends State<DiaryScreen> {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: ValueListenableBuilder<Box<DiaryEntry>>(
+        child: ValueListenableBuilder<List<DiaryEntry>>(
           valueListenable: DiaryService.instance.listenable(),
-          builder: (context, box, _) {
-            final grouped = DiaryService.instance.entriesByCategory(normalizedToday);
+          builder: (context, _, __) {
+            final grouped =
+                DiaryService.instance.entriesByCategory(normalizedToday);
             final totals = DiaryService.instance.totalsForDay(normalizedToday);
             final hasEntries = grouped.values.any((list) => list.isNotEmpty);
             final timeFormat = DateFormat.Hm();
@@ -41,22 +39,11 @@ class _DiaryScreenState extends State<DiaryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(
-                          'Мой дневник',
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      FilledButton.icon(
-                        onPressed: widget.onAddFood,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Добавить еду'),
-                      ),
-                    ],
+                  Text(
+                    'Мой дневник',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   for (final category in MealCategory.values)
@@ -97,7 +84,8 @@ class _DiaryScreenState extends State<DiaryScreen> {
                   const SizedBox(height: 24),
                   Text(
                     'Итоги за день',
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 12),
                   if (totals != null)
@@ -134,7 +122,9 @@ class _TotalsCard extends StatelessWidget {
         spacing: 12,
         runSpacing: 12,
         children: <Widget>[
-          _Metric(title: 'Калории', value: '${number.format(totals.calories)} ккал'),
+          _Metric(
+              title: 'Калории',
+              value: '${number.format(totals.calories)} ккал'),
           _Metric(title: 'Белки', value: '${number.format(totals.protein)} г'),
           _Metric(title: 'Жиры', value: '${number.format(totals.fat)} г'),
           _Metric(title: 'Углеводы', value: '${number.format(totals.carbs)} г'),
@@ -192,9 +182,11 @@ class _CategorySection extends StatelessWidget {
           onExpansionChanged: (_) => onToggle(),
           title: Text(
             category.displayName,
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
-          childrenPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          childrenPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           children: entries.isEmpty
               ? <Widget>[
                   Padding(
@@ -209,7 +201,8 @@ class _CategorySection extends StatelessWidget {
                   .map(
                     (entry) => Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child: _DiaryEntryTile(entry: entry, timeFormat: timeFormat),
+                      child:
+                          _DiaryEntryTile(entry: entry, timeFormat: timeFormat),
                     ),
                   )
                   .toList(),
@@ -243,9 +236,11 @@ class _DiaryEntryTile extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     entry.name,
-                    style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w600),
                   ),
-                  if (entry.brand != null && entry.brand!.isNotEmpty) ...<Widget>[
+                  if (entry.brand != null &&
+                      entry.brand!.isNotEmpty) ...<Widget>[
                     const SizedBox(height: 2),
                     Text(
                       entry.brand!,
@@ -259,7 +254,7 @@ class _DiaryEntryTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Источник: ${entry.source}',
+                    'Категория: ${entry.category.displayName} · Источник: ${entry.source}',
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),
@@ -299,7 +294,8 @@ class _DiaryEntryTile extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.25),
+              color:
+                  theme.colorScheme.secondaryContainer.withValues(alpha: 0.25),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(entry.note!, style: theme.textTheme.bodyMedium),
@@ -339,7 +335,8 @@ class _DiaryEntryTile extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+                onPressed: () =>
+                    Navigator.of(context).pop(controller.text.trim()),
                 child: const Text('Сохранить заметку'),
               ),
             ],
@@ -349,7 +346,8 @@ class _DiaryEntryTile extends StatelessWidget {
     );
 
     if (result != null) {
-      await DiaryService.instance.updateNote(entry.id, result.isEmpty ? null : result);
+      await DiaryService.instance
+          .updateNote(entry.id, result.isEmpty ? null : result);
     }
   }
 }
@@ -401,7 +399,9 @@ class _Metric extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(title, style: theme.textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600)),
+        Text(title,
+            style: theme.textTheme.labelLarge
+                ?.copyWith(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
         Text(value, style: theme.textTheme.titleMedium),
       ],

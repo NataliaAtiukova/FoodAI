@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'app_secrets.dart';
 import 'screens/diary_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/manual_screen.dart';
 import 'screens/my_product_screen.dart';
 import 'screens/progress_screen.dart';
 import 'screens/search_screen.dart';
@@ -25,15 +24,13 @@ class FoodAiApp extends StatefulWidget {
 
 class _FoodAiAppState extends State<FoodAiApp> {
   int _currentIndex = 0;
-  final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
 
   @override
   Widget build(BuildContext context) {
     final tabs = <Widget>[
-      HomeScreen(key: _homeKey, onNavigateToTab: _setCurrentIndex),
-      DiaryScreen(onAddFood: _onAddFood),
+      HomeScreen(onNavigateToTab: _setCurrentIndex),
+      const DiaryScreen(),
       const SearchScreen(),
-      const ManualScreen(),
       const MyProductScreen(),
       const ProgressScreen(),
     ];
@@ -44,7 +41,8 @@ class _FoodAiAppState extends State<FoodAiApp> {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
         scaffoldBackgroundColor: Colors.white,
-        snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
+        snackBarTheme:
+            const SnackBarThemeData(behavior: SnackBarBehavior.floating),
       ),
       home: Scaffold(
         appBar: AppBar(
@@ -60,12 +58,16 @@ class _FoodAiAppState extends State<FoodAiApp> {
           selectedItemColor: Theme.of(context).colorScheme.primary,
           onTap: (index) => setState(() => _currentIndex = index),
           items: const <BottomNavigationBarItem>[
-            BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.book_outlined), label: 'Diary'),
-            BottomNavigationBarItem(icon: Icon(Icons.search_outlined), label: 'Search'),
-            BottomNavigationBarItem(icon: Icon(Icons.restaurant_menu), label: 'Блюда'),
-            BottomNavigationBarItem(icon: Icon(Icons.edit_outlined), label: 'Мой продукт'),
-            BottomNavigationBarItem(icon: Icon(Icons.show_chart_outlined), label: 'Progress'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.home_outlined), label: 'Home'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.book_outlined), label: 'Diary'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.search_outlined), label: 'Search'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.edit_outlined), label: 'Мой продукт'),
+            BottomNavigationBarItem(
+                icon: Icon(Icons.show_chart_outlined), label: 'Progress'),
           ],
         ),
       ),
@@ -81,10 +83,8 @@ class _FoodAiAppState extends State<FoodAiApp> {
       case 2:
         return 'Поиск';
       case 3:
-        return 'Русские блюда';
-      case 4:
         return 'Мой продукт';
-      case 5:
+      case 4:
         return 'Прогресс';
       default:
         return 'FoodAI';
@@ -94,83 +94,4 @@ class _FoodAiAppState extends State<FoodAiApp> {
   void _setCurrentIndex(int index) {
     setState(() => _currentIndex = index);
   }
-
-  Future<void> _onAddFood() async {
-    if (!mounted) {
-      return;
-    }
-
-    final action = await showModalBottomSheet<_AddFoodAction>(
-      context: context,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              ListTile(
-                leading: const Icon(Icons.search_outlined),
-                title: const Text('Поиск по базе'),
-                onTap: () => Navigator.of(context).pop(_AddFoodAction.search),
-              ),
-              ListTile(
-                leading: const Icon(Icons.restaurant_menu),
-                title: const Text('Популярные блюда'),
-                onTap: () => Navigator.of(context).pop(_AddFoodAction.dishes),
-              ),
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Мой продукт'),
-                onTap: () => Navigator.of(context).pop(_AddFoodAction.manual),
-              ),
-              ListTile(
-                leading: const Icon(Icons.camera_alt_outlined),
-                title: const Text('Сканировать камерой'),
-                onTap: () => Navigator.of(context).pop(_AddFoodAction.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('Выбрать фото'),
-                onTap: () => Navigator.of(context).pop(_AddFoodAction.gallery),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-
-    if (action == null) {
-      return;
-    }
-
-    void switchToHome(VoidCallback? callback) {
-      setState(() => _currentIndex = 0);
-      if (callback != null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => callback());
-      }
-    }
-
-    switch (action) {
-      case _AddFoodAction.search:
-        _setCurrentIndex(2);
-        break;
-      case _AddFoodAction.dishes:
-        _setCurrentIndex(3);
-        break;
-      case _AddFoodAction.manual:
-        _setCurrentIndex(4);
-        break;
-      case _AddFoodAction.camera:
-        switchToHome(() => _homeKey.currentState?.startCameraScan());
-        break;
-      case _AddFoodAction.gallery:
-        switchToHome(() => _homeKey.currentState?.startGalleryPick());
-        break;
-    }
-  }
 }
-
-enum _AddFoodAction { search, dishes, manual, camera, gallery }

@@ -1,8 +1,6 @@
-import 'package:hive/hive.dart';
-
 import 'meal_category.dart';
 
-class DiaryEntry extends HiveObject {
+class DiaryEntry {
   DiaryEntry({
     required this.id,
     required this.name,
@@ -21,87 +19,96 @@ class DiaryEntry extends HiveObject {
     this.labels,
   });
 
-  String id;
-  String name;
-  String? brand;
-  double calories;
-  double protein;
-  double fat;
-  double carbs;
-  DateTime timestamp;
-  String goal;
-  String advice;
-  MealCategory category;
-  String source;
-  String? note;
-  String? imagePath;
-  List<String>? labels;
-}
+  final String id;
+  final String name;
+  final String? brand;
+  final double calories;
+  final double protein;
+  final double fat;
+  final double carbs;
+  final DateTime timestamp;
+  final String goal;
+  final String advice;
+  final MealCategory category;
+  final String source;
+  final String? note;
+  final String? imagePath;
+  final List<String>? labels;
 
-class DiaryEntryAdapter extends TypeAdapter<DiaryEntry> {
-  @override
-  final int typeId = 0;
-
-  @override
-  DiaryEntry read(BinaryReader reader) {
-    final fields = <int, dynamic>{};
-    final count = reader.readByte();
-    for (var i = 0; i < count; i++) {
-      final key = reader.readByte();
-      fields[key] = reader.read();
-    }
+  DiaryEntry copyWith({
+    String? note,
+    String? advice,
+  }) {
     return DiaryEntry(
-      id: fields[0] as String,
-      name: fields[1] as String,
-      calories: (fields[2] as num).toDouble(),
-      protein: (fields[3] as num).toDouble(),
-      fat: (fields[4] as num).toDouble(),
-      carbs: (fields[5] as num).toDouble(),
-      timestamp: fields[6] as DateTime,
-      goal: fields[7] as String,
-      advice: fields[8] as String,
-      note: fields[9] as String?,
-      category: MealCategoryExt.fromStorage(fields[10] as String?),
-      source: (fields[11] as String?) ?? 'Неизвестно',
-      brand: (fields[12] as String?)?.trim(),
-      imagePath: fields[13] as String?,
-      labels: (fields[14] as List?)?.map((dynamic e) => e.toString()).toList(),
+      id: id,
+      name: name,
+      brand: brand,
+      calories: calories,
+      protein: protein,
+      fat: fat,
+      carbs: carbs,
+      timestamp: timestamp,
+      goal: goal,
+      advice: advice ?? this.advice,
+      category: category,
+      source: source,
+      note: note ?? this.note,
+      imagePath: imagePath,
+      labels: labels == null ? null : List<String>.from(labels!),
     );
   }
 
-  @override
-  void write(BinaryWriter writer, DiaryEntry obj) {
-    writer
-      ..writeByte(15)
-      ..writeByte(0)
-      ..write(obj.id)
-      ..writeByte(1)
-      ..write(obj.name)
-      ..writeByte(2)
-      ..write(obj.calories)
-      ..writeByte(3)
-      ..write(obj.protein)
-      ..writeByte(4)
-      ..write(obj.fat)
-      ..writeByte(5)
-      ..write(obj.carbs)
-      ..writeByte(6)
-      ..write(obj.timestamp)
-      ..writeByte(7)
-      ..write(obj.goal)
-      ..writeByte(8)
-      ..write(obj.advice)
-      ..writeByte(9)
-      ..write(obj.note)
-      ..writeByte(10)
-      ..write(obj.category.storageValue)
-      ..writeByte(11)
-      ..write(obj.source)
-      ..writeByte(12)
-      ..write(obj.brand)
-      ..writeByte(13)
-      ..write(obj.imagePath)
-      ..writeByte(14)
-      ..write(obj.labels);
+  Map<String, dynamic> toJson() {
+    return <String, dynamic>{
+      'id': id,
+      'name': name,
+      'brand': brand,
+      'calories': calories,
+      'protein': protein,
+      'fat': fat,
+      'carbs': carbs,
+      'timestamp': timestamp.toIso8601String(),
+      'goal': goal,
+      'advice': advice,
+      'category': category.storageValue,
+      'source': source,
+      'note': note,
+      'imagePath': imagePath,
+      'labels': labels,
+    };
+  }
+
+  factory DiaryEntry.fromJson(Map<String, dynamic> json) {
+    return DiaryEntry(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      brand: (json['brand'] as String?)?.trim().isEmpty ?? true
+          ? null
+          : (json['brand'] as String).trim(),
+      calories: _parseDouble(json['calories']),
+      protein: _parseDouble(json['protein']),
+      fat: _parseDouble(json['fat']),
+      carbs: _parseDouble(json['carbs']),
+      timestamp: DateTime.tryParse(json['timestamp'] as String? ?? '') ??
+          DateTime.now(),
+      goal: json['goal'] as String? ?? '',
+      advice: json['advice'] as String? ?? '',
+      category: MealCategoryExt.fromStorage(json['category'] as String?),
+      source: json['source'] as String? ?? 'Home',
+      note: json['note'] as String?,
+      imagePath: json['imagePath'] as String?,
+      labels:
+          (json['labels'] as List?)?.map((dynamic e) => e.toString()).toList(),
+    );
+  }
+
+  static double _parseDouble(Object? value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      return double.tryParse(value) ?? 0;
+    }
+    return 0;
   }
 }

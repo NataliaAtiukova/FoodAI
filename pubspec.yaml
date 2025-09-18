@@ -15,9 +15,7 @@ dependencies:
   googleapis: ^13.1.0
   googleapis_auth: ^1.6.0
   image_picker: ^1.0.7
-  hive: ^2.2.3
-  hive_flutter: ^1.1.0
-  path_provider: ^2.1.2
+  shared_preferences: ^2.2.2
   fl_chart: ^0.66.2
   intl: ^0.18.1
   uuid: ^4.4.0
@@ -26,7 +24,6 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.1
-  path_provider_platform_interface: ^2.0.6
 
 flutter:
   uses-material-design: true

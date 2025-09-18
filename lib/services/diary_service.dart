@@ -1,5 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/diary_entry.dart';
@@ -9,35 +11,49 @@ class DiaryService {
   DiaryService._();
 
   static final DiaryService instance = DiaryService._();
-  static const String _entriesBox = 'diary_entries';
-  static const String _metaBox = 'diary_meta';
+  static const String _storageKey = 'diary_entries_v1';
   static const Uuid _uuid = Uuid();
 
-  late Box<DiaryEntry> _entries;
-  late Box<dynamic> _meta;
+  final ValueNotifier<List<DiaryEntry>> _entriesNotifier =
+      ValueNotifier<List<DiaryEntry>>(<DiaryEntry>[]);
+
+  SharedPreferences? _preferences;
   bool _initialized = false;
 
   Future<void> init() async {
     if (_initialized) {
       return;
     }
-    await Hive.initFlutter();
-    if (!Hive.isAdapterRegistered(0)) {
-      Hive.registerAdapter(DiaryEntryAdapter());
+
+    _preferences = await SharedPreferences.getInstance();
+    final raw = _preferences!.getString(_storageKey);
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw) as List<dynamic>;
+        final entries = decoded
+            .map((dynamic item) =>
+                DiaryEntry.fromJson(item as Map<String, dynamic>))
+            .toList();
+        entries.sort(
+          (a, b) => b.timestamp.compareTo(a.timestamp),
+        );
+        _entriesNotifier.value = List<DiaryEntry>.unmodifiable(entries);
+      } catch (_) {
+        _entriesNotifier.value = const <DiaryEntry>[];
+      }
     }
-    _entries = await Hive.openBox<DiaryEntry>(_entriesBox);
-    _meta = await Hive.openBox<dynamic>(_metaBox);
+
     _initialized = true;
   }
 
-  ValueListenable<Box<DiaryEntry>> listenable() {
+  ValueListenable<List<DiaryEntry>> listenable() {
     _ensureInitialized();
-    return _entries.listenable();
+    return _entriesNotifier;
   }
 
-  ValueListenable<Box<dynamic>> metaListenable() {
+  List<DiaryEntry> getEntries() {
     _ensureInitialized();
-    return _meta.listenable();
+    return _entriesNotifier.value;
   }
 
   Future<DiaryEntry> addEntry({
@@ -56,75 +72,75 @@ class DiaryService {
     List<String>? labels,
   }) async {
     _ensureInitialized();
+
     final entry = DiaryEntry(
       id: _uuid.v4(),
       name: name,
+      brand: brand,
       calories: calories,
       protein: protein,
       fat: fat,
       carbs: carbs,
+      timestamp: timestamp ?? DateTime.now(),
       goal: goal,
       advice: advice,
       category: category,
       source: source,
-      brand: brand,
-      timestamp: timestamp ?? DateTime.now(),
+      note: null,
       imagePath: imagePath,
       labels: labels,
     );
-    await _entries.put(entry.id, entry);
-    return entry;
-  }
 
-  List<DiaryEntry> getEntries() {
-    _ensureInitialized();
-    final entries = _entries.values.toList();
+    final entries = List<DiaryEntry>.from(_entriesNotifier.value)..add(entry);
     entries.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-    return entries;
+    await _setEntries(entries);
+    return entry;
   }
 
   Future<void> updateNote(String id, String? note) async {
     _ensureInitialized();
-    final entry = _entries.get(id);
-    if (entry == null) {
-      return;
-    }
-    entry.note = note;
-    await entry.save();
+    final entries = _entriesNotifier.value
+        .map((entry) => entry.id == id ? entry.copyWith(note: note) : entry)
+        .toList();
+    await _setEntries(entries);
   }
 
   Future<void> deleteEntry(String id) async {
     _ensureInitialized();
-    await _entries.delete(id);
+    final entries =
+        _entriesNotifier.value.where((entry) => entry.id != id).toList();
+    await _setEntries(entries);
   }
 
   Map<MealCategory, List<DiaryEntry>> entriesByCategory(DateTime day) {
     _ensureInitialized();
     final normalized = DateTime(day.year, day.month, day.day);
-    final Map<MealCategory, List<DiaryEntry>> result = {
+    final Map<MealCategory, List<DiaryEntry>> grouped = {
       for (final category in MealCategory.values) category: <DiaryEntry>[],
     };
 
-    for (final entry in _entries.values) {
-      final entryDay = DateTime(entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
+    for (final entry in _entriesNotifier.value) {
+      final entryDay = DateTime(
+          entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
       if (entryDay == normalized) {
-        result[entry.category]?.add(entry);
+        grouped[entry.category]?.add(entry);
       }
     }
 
     for (final category in MealCategory.values) {
-      result[category]?.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      grouped[category]?.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     }
 
-    return result;
+    return grouped;
   }
 
   DailyTotals? totalsForDay(DateTime day) {
     _ensureInitialized();
     final normalized = DateTime(day.year, day.month, day.day);
     DailyTotals? totals;
-    for (final entry in _entries.values) {
-      final entryDay = DateTime(entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
+    for (final entry in _entriesNotifier.value) {
+      final entryDay = DateTime(
+          entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
       if (entryDay == normalized) {
         totals = (totals ?? DailyTotals.zero()).add(entry);
       }
@@ -134,9 +150,10 @@ class DiaryService {
 
   Map<DateTime, DailyTotals> totalsByDay() {
     _ensureInitialized();
-    final Map<DateTime, DailyTotals> totals = {};
-    for (final entry in _entries.values) {
-      final day = DateTime(entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
+    final Map<DateTime, DailyTotals> totals = <DateTime, DailyTotals>{};
+    for (final entry in _entriesNotifier.value) {
+      final day = DateTime(
+          entry.timestamp.year, entry.timestamp.month, entry.timestamp.day);
       totals.update(
         day,
         (value) => value.add(entry),
@@ -146,15 +163,32 @@ class DiaryService {
     return totals;
   }
 
+  Future<void> _setEntries(List<DiaryEntry> entries) async {
+    entries.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    _entriesNotifier.value = List<DiaryEntry>.unmodifiable(entries);
+    await _persistEntries();
+  }
+
+  Future<void> _persistEntries() async {
+    if (_preferences == null) {
+      return;
+    }
+    final payload = jsonEncode(
+      _entriesNotifier.value.map((entry) => entry.toJson()).toList(),
+    );
+    await _preferences!.setString(_storageKey, payload);
+  }
+
   void _ensureInitialized() {
     if (!_initialized) {
-      throw StateError('DiaryService.init() must быть вызван до использования.');
+      throw StateError(
+          'DiaryService.init() должен быть вызван до использования.');
     }
   }
 }
 
 class DailyTotals {
-  DailyTotals({
+  const DailyTotals({
     required this.calories,
     required this.protein,
     required this.fat,
@@ -166,7 +200,7 @@ class DailyTotals {
   final double fat;
   final double carbs;
 
-  factory DailyTotals.zero() => DailyTotals(
+  factory DailyTotals.zero() => const DailyTotals(
         calories: 0,
         protein: 0,
         fat: 0,

@@ -1,6 +1,5 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../models/diary_entry.dart';
@@ -14,26 +13,22 @@ class ProgressScreen extends StatelessWidget {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: ValueListenableBuilder<Box<dynamic>>(
-          valueListenable: DiaryService.instance.metaListenable(),
-          builder: (context, _, __) {
-            return ValueListenableBuilder<Box<DiaryEntry>>(
-              valueListenable: DiaryService.instance.listenable(),
-              builder: (context, __, ___) {
-                final totalsMap = DiaryService.instance.totalsByDay();
-                final lineData = _buildLineData(totalsMap);
-                final todayTotals = DiaryService.instance.totalsForDay(DateTime.now());
+        child: ValueListenableBuilder<List<DiaryEntry>>(
+          valueListenable: DiaryService.instance.listenable(),
+          builder: (context, __, ___) {
+            final totalsMap = DiaryService.instance.totalsByDay();
+            final lineData = _buildLineData(totalsMap);
+            final todayTotals =
+                DiaryService.instance.totalsForDay(DateTime.now());
 
-                return ListView(
-                  children: <Widget>[
-                    _ProgressHeader(),
-                    const SizedBox(height: 20),
-                    _CaloriesChart(data: lineData),
-                    const SizedBox(height: 20),
-                    _MacrosPieCard(totals: todayTotals),
-                  ],
-                );
-              },
+            return ListView(
+              children: <Widget>[
+                _ProgressHeader(),
+                const SizedBox(height: 20),
+                _CaloriesChart(data: lineData),
+                const SizedBox(height: 20),
+                _MacrosPieCard(totals: todayTotals),
+              ],
             );
           },
         ),
@@ -78,7 +73,8 @@ class _ProgressHeader extends StatelessWidget {
         children: <Widget>[
           Text(
             'Ваш прогресс',
-            style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            style: theme.textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 12),
           Text(
@@ -122,7 +118,8 @@ class _CaloriesChart extends StatelessWidget {
           children: <Widget>[
             Text(
               'Калории за неделю',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
             SizedBox(
@@ -132,10 +129,13 @@ class _CaloriesChart extends StatelessWidget {
                   minY: 0,
                   maxY: data.maxCalories == 0 ? 1000 : data.maxCalories * 1.2,
                   borderData: FlBorderData(show: false),
-                  gridData: const FlGridData(show: true, drawVerticalLine: false),
+                  gridData:
+                      const FlGridData(show: true, drawVerticalLine: false),
                   titlesData: FlTitlesData(
-                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
@@ -171,7 +171,8 @@ class _CaloriesChart extends StatelessWidget {
                       dotData: const FlDotData(show: false),
                       belowBarData: BarAreaData(
                         show: true,
-                        color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                        color:
+                            theme.colorScheme.primary.withValues(alpha: 0.15),
                       ),
                     ),
                   ],
@@ -204,7 +205,8 @@ class _MacrosPieCard extends StatelessWidget {
             children: <Widget>[
               Text('Распределение БЖУ', style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
-              const Text('Добавьте записи за сегодня, чтобы увидеть диаграмму.'),
+              const Text(
+                  'Добавьте записи за сегодня, чтобы увидеть диаграмму.'),
             ],
           ),
         ),
@@ -226,7 +228,8 @@ class _MacrosPieCard extends StatelessWidget {
           children: <Widget>[
             Text(
               'Распределение БЖУ',
-              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 16),
             SizedBox(
