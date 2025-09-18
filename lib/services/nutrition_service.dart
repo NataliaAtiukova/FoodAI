@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../app_secrets.dart';
 import '../models/nutrition_models.dart';
+import '../models/search_food_item.dart';
 
 class NutritionException implements Exception {
   NutritionException(this.message);
@@ -28,6 +29,8 @@ class NutritionService {
 
   static final Uri _nutritionixUri =
       Uri.parse('https://trackapi.nutritionix.com/v2/natural/nutrients');
+  static final Uri _nutritionixSearchUri =
+      Uri.parse('https://trackapi.nutritionix.com/v2/search/instant');
   static final Uri _yandexUri = Uri.parse(
     'https://llm.api.cloud.yandex.net/foundationModels/v1/completion',
   );
@@ -97,6 +100,61 @@ class NutritionService {
           ? (first['photo']['thumb'] as String?)
           : null,
     );
+  }
+
+  Future<List<SearchFoodItem>> searchFoods(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      return const <SearchFoodItem>[];
+    }
+
+    final appId = envOrThrow('NUTRITIONIX_APP_ID');
+    final appKey = envOrThrow('NUTRITIONIX_APP_KEY');
+
+    final response = await http.get(
+      _nutritionixSearchUri.replace(queryParameters: <String, String>{
+        'query': trimmed,
+        'detailed': 'true',
+      }),
+      headers: <String, String>{
+        'x-app-id': appId,
+        'x-app-key': appKey,
+      },
+    );
+
+    if (response.statusCode != 200) {
+      return const <SearchFoodItem>[];
+    }
+
+    final Map<String, dynamic> payload = jsonDecode(response.body);
+    final List<SearchFoodItem> results = <SearchFoodItem>[];
+
+    void parseList(dynamic list) {
+      if (list is List) {
+        for (final item in list) {
+          if (item is Map<String, dynamic>) {
+            final name = (item['food_name'] as String?)?.trim();
+            if (name == null || name.isEmpty) {
+              continue;
+            }
+            final brand = (item['brand_name'] as String?)?.trim();
+            String? thumb;
+            final photo = item['photo'];
+            if (photo is Map<String, dynamic>) {
+              thumb = (photo['thumb'] as String?)?.trim();
+            }
+            results.add(
+              SearchFoodItem(name: name, brand: brand, thumbnailUrl: thumb),
+            );
+          }
+        }
+      }
+    }
+
+    parseList(payload['common']);
+    parseList(payload['branded']);
+
+    return results;
   }
 
   Future<String> fetchDietAdvice(

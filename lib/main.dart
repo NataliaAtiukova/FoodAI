@@ -4,6 +4,7 @@ import 'app_secrets.dart';
 import 'screens/diary_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/progress_screen.dart';
+import 'screens/search_screen.dart';
 import 'services/diary_service.dart';
 
 Future<void> main() async {
@@ -29,6 +30,7 @@ class _FoodAiAppState extends State<FoodAiApp> {
     final tabs = <Widget>[
       HomeScreen(key: _homeKey),
       DiaryScreen(onAddFood: _onAddFood),
+      const SearchScreen(),
       const ProgressScreen(),
     ];
 
@@ -56,6 +58,7 @@ class _FoodAiAppState extends State<FoodAiApp> {
           items: const <BottomNavigationBarItem>[
             BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
             BottomNavigationBarItem(icon: Icon(Icons.book_outlined), label: 'Diary'),
+            BottomNavigationBarItem(icon: Icon(Icons.search_outlined), label: 'Search'),
             BottomNavigationBarItem(icon: Icon(Icons.show_chart_outlined), label: 'Progress'),
           ],
         ),
@@ -70,6 +73,8 @@ class _FoodAiAppState extends State<FoodAiApp> {
       case 1:
         return 'Мой дневник';
       case 2:
+        return 'Поиск';
+      case 3:
         return 'Прогресс';
       default:
         return 'FoodAI';
