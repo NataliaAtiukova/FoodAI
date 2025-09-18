@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:hive_flutter/hive_flutter.dart';
+
 import '../models/diary_entry.dart';
 import '../models/meal_category.dart';
 import '../models/nutrition_models.dart';
@@ -433,31 +435,29 @@ class _SearchScreenState extends State<SearchScreen> {
                       separatorBuilder: (_, __) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final item = _results[index];
-                        final entry = _findMatchingEntry(entries, item);
-                        final isAdded = entry != null;
-                        return ListTile(
-                          leading: item.thumbnailUrl != null
-                              ? CircleAvatar(backgroundImage: NetworkImage(item.thumbnailUrl!))
-                              : const CircleAvatar(child: Icon(Icons.restaurant_outlined)),
-                          title: Text(item.name),
-                          subtitle: item.brand == null || item.brand!.isEmpty
-                              ? null
-                              : Text(item.brand!),
-                          trailing: isAdded
-                              ? OutlinedButton(
-                                  onPressed: () => DiaryService.instance.deleteEntry(entry!.id),
-                                  child: const Text('Убрать'),
-                                )
-                              : FilledButton.tonal(
-                                  onPressed:
-                                      _isAdding ? null : () => _addFood(item),
-                                  child: const Text('Добавить'),
-                                ),
-                        );
-                      },
+                    final entry = _findMatchingEntry(entries, item);
+                    return ListTile(
+                      leading: item.thumbnailUrl != null
+                          ? CircleAvatar(backgroundImage: NetworkImage(item.thumbnailUrl!))
+                          : const CircleAvatar(child: Icon(Icons.restaurant_outlined)),
+                      title: Text(item.name),
+                      subtitle: item.brand == null || item.brand!.isEmpty
+                          ? null
+                          : Text(item.brand!),
+                      trailing: entry != null
+                          ? OutlinedButton(
+                              onPressed: () => DiaryService.instance.deleteEntry(entry.id),
+                              child: const Text('Убрать'),
+                            )
+                          : FilledButton.tonal(
+                              onPressed: _isAdding ? null : () => _addFood(item),
+                              child: const Text('Добавить'),
+                            ),
                     );
                   },
-                ),
+                );
+              },
+            ),
               ),
           ],
         ),

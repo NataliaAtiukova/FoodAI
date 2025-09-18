@@ -8,7 +8,8 @@ plugins {
 android {
     namespace = "com.example.food_ai"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Force NDK version to satisfy plugin requirements
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
