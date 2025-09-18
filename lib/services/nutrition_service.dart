@@ -31,6 +31,8 @@ class NutritionService {
       Uri.parse('https://trackapi.nutritionix.com/v2/natural/nutrients');
   static final Uri _nutritionixSearchUri =
       Uri.parse('https://trackapi.nutritionix.com/v2/search/instant');
+  static const String _openFoodFactsEndpoint =
+      'https://world.openfoodfacts.org/api/v0/product/';
   static final Uri _yandexUri = Uri.parse(
     'https://llm.api.cloud.yandex.net/foundationModels/v1/completion',
   );
@@ -155,6 +157,65 @@ class NutritionService {
     parseList(payload['branded']);
 
     return results;
+  }
+
+  Future<NutritionResult?> fetchFoodByBarcode(String barcode) async {
+    final trimmed = barcode.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+
+    final response = await http.get(Uri.parse('$_openFoodFactsEndpoint$trimmed.json'));
+    if (response.statusCode != 200) {
+      return null;
+    }
+
+    final Map<String, dynamic> payload = jsonDecode(response.body);
+    final product = payload['product'];
+    if (product is! Map<String, dynamic>) {
+      return null;
+    }
+
+    final nutriments = product['nutriments'];
+    if (nutriments is! Map<String, dynamic>) {
+      return null;
+    }
+
+    double? readNutriment(String key) {
+      final value = nutriments[key];
+      if (value is num) {
+        return value.toDouble();
+      }
+      if (value is String) {
+        return double.tryParse(value);
+      }
+      return null;
+    }
+
+    final calories = readNutriment('energy-kcal_100g');
+    final protein = readNutriment('proteins_100g');
+    final fat = readNutriment('fat_100g');
+    final carbs = readNutriment('carbohydrates_100g');
+
+    if (calories == null || protein == null || fat == null || carbs == null) {
+      return null;
+    }
+
+    final facts = NutritionFacts(
+      calories: calories,
+      protein: protein,
+      fat: fat,
+      carbs: carbs,
+    );
+
+    final name = (product['product_name'] as String?)?.trim();
+    return NutritionResult(
+      name: name == null || name.isEmpty ? 'Продукт по штрихкоду $trimmed' : name,
+      facts: facts,
+      servingQuantity: 100,
+      servingUnit: 'г',
+      photoUrl: (product['image_thumb_url'] as String?)?.trim(),
+    );
   }
 
   Future<String> fetchDietAdvice(

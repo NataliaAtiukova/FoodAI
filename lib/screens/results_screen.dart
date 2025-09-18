@@ -15,12 +15,14 @@ class ResultsScreen extends StatefulWidget {
     required this.goal,
     this.imagePath,
     this.predictions,
+    required this.source,
   });
 
   final NutritionAnalysis analysis;
   final NutritionGoal goal;
   final String? imagePath;
   final List<VisionPrediction>? predictions;
+  final String source;
 
   @override
   State<ResultsScreen> createState() => _ResultsScreenState();
@@ -46,6 +48,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
         goal: widget.goal.label,
         advice: widget.analysis.advice,
         category: _selectedCategory,
+        source: widget.source,
         imagePath: widget.imagePath,
         labels: widget.predictions
             ?.map((prediction) =>

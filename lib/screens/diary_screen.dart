@@ -250,6 +250,11 @@ class _DiaryEntryTile extends StatelessWidget {
                     '${entry.calories.toStringAsFixed(0)} ккал · $timeText',
                     style: theme.textTheme.bodySmall,
                   ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Источник: ${entry.source}',
+                    style: theme.textTheme.bodySmall,
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     'Б:${entry.protein.toStringAsFixed(0)}г · Ж:${entry.fat.toStringAsFixed(0)}г · У:${entry.carbs.toStringAsFixed(0)}г',

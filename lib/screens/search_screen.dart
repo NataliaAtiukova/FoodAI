@@ -15,15 +15,18 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
+  final TextEditingController _barcodeController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
   NutritionGoal _selectedGoal = NutritionGoal.healthyLifestyle;
   bool _isLoading = false;
+  bool _isBarcodeLoading = false;
   bool _isAdding = false;
   List<SearchFoodItem> _results = const <SearchFoodItem>[];
 
   @override
   void dispose() {
     _controller.dispose();
+    _barcodeController.dispose();
     _focusNode.dispose();
     super.dispose();
   }
@@ -51,6 +54,84 @@ class _SearchScreenState extends State<SearchScreen> {
     }
   }
 
+  Future<void> _searchBarcode() async {
+    final barcode = _barcodeController.text.trim();
+    if (barcode.isEmpty) {
+      _showSnackBar('Введите штрихкод.');
+      return;
+    }
+
+    setState(() => _isBarcodeLoading = true);
+    try {
+      final result = await NutritionService.instance.fetchFoodByBarcode(barcode);
+      if (!mounted) {
+        return;
+      }
+      if (result == null) {
+        _showSnackBar('Продукт не найден по штрихкоду.');
+        return;
+      }
+
+      final grams = await _askPortion(result.name);
+      if (grams == null) {
+        return;
+      }
+
+      final category = await _pickCategory();
+      if (category == null) {
+        return;
+      }
+
+      setState(() => _isAdding = true);
+
+      try {
+        final ratio = grams / 100;
+        final scaledFacts = NutritionFacts(
+          calories: result.facts.calories * ratio,
+          protein: result.facts.protein * ratio,
+          fat: result.facts.fat * ratio,
+          carbs: result.facts.carbs * ratio,
+        );
+        String advice;
+        try {
+          advice = await NutritionService.instance.fetchDietAdvice(
+            scaledFacts,
+            _selectedGoal,
+            productName: result.name,
+          );
+        } catch (_) {
+          advice = 'Добавлено по штрихкоду.';
+        }
+
+        await DiaryService.instance.addEntry(
+          name: result.name,
+          calories: scaledFacts.calories,
+          protein: scaledFacts.protein,
+          fat: scaledFacts.fat,
+          carbs: scaledFacts.carbs,
+          goal: _selectedGoal.label,
+          advice: advice,
+          category: category,
+          source: 'Штрихкод',
+        );
+        if (!mounted) {
+          return;
+        }
+        _showSnackBar('Добавлено в дневник');
+      } finally {
+        if (mounted) {
+          setState(() => _isAdding = false);
+        }
+      }
+    } catch (error) {
+      _showSnackBar('Ошибка поиска штрихкода: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isBarcodeLoading = false);
+      }
+    }
+  }
+
   Future<void> _addFood(SearchFoodItem item) async {
     final category = await _pickCategory();
     if (category == null) {
@@ -73,6 +154,7 @@ class _SearchScreenState extends State<SearchScreen> {
         goal: _selectedGoal.label,
         advice: analysis.advice,
         category: category,
+        source: 'Поиск',
       );
       if (!mounted) {
         return;
@@ -89,6 +171,55 @@ class _SearchScreenState extends State<SearchScreen> {
         setState(() => _isAdding = false);
       }
     }
+  }
+
+  Future<double?> _askPortion(String name) async {
+    final controller = TextEditingController(text: '100');
+    return showModalBottomSheet<double>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+            top: 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                'Граммовка для "$name"',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  suffixText: 'г',
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () {
+                  final value = double.tryParse(controller.text.replaceAll(',', '.'));
+                  Navigator.of(context).pop(value);
+                },
+                child: const Text('Продолжить'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<MealCategory?> _pickCategory() async {
@@ -117,10 +248,9 @@ class _SearchScreenState extends State<SearchScreen> {
                       value: category,
                       groupValue: selected,
                       onChanged: (value) {
-                        if (value == null) {
-                          return;
+                        if (value != null) {
+                          setModalState(() => selected = value);
                         }
-                        setModalState(() => selected = value);
                       },
                       title: Text(category.displayName),
                     ),
@@ -176,6 +306,32 @@ class _SearchScreenState extends State<SearchScreen> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _barcodeController,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                hintText: 'Штрихкод (Open Food Facts)',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonalIcon(
+                onPressed: _isBarcodeLoading ? null : _searchBarcode,
+                icon: _isBarcodeLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.qr_code_scanner),
+                label: const Text('Найти по штрихкоду'),
               ),
             ),
             const SizedBox(height: 16),

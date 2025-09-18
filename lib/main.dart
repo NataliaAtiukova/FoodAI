@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'app_secrets.dart';
 import 'screens/diary_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/manual_screen.dart';
 import 'screens/progress_screen.dart';
 import 'screens/search_screen.dart';
 import 'services/diary_service.dart';
@@ -28,9 +29,10 @@ class _FoodAiAppState extends State<FoodAiApp> {
   @override
   Widget build(BuildContext context) {
     final tabs = <Widget>[
-      HomeScreen(key: _homeKey),
+      HomeScreen(key: _homeKey, onNavigateToTab: _setCurrentIndex),
       DiaryScreen(onAddFood: _onAddFood),
       const SearchScreen(),
+      const ManualScreen(),
       const ProgressScreen(),
     ];
 
@@ -59,6 +61,7 @@ class _FoodAiAppState extends State<FoodAiApp> {
             BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
             BottomNavigationBarItem(icon: Icon(Icons.book_outlined), label: 'Diary'),
             BottomNavigationBarItem(icon: Icon(Icons.search_outlined), label: 'Search'),
+            BottomNavigationBarItem(icon: Icon(Icons.edit_outlined), label: 'Manual'),
             BottomNavigationBarItem(icon: Icon(Icons.show_chart_outlined), label: 'Progress'),
           ],
         ),
@@ -75,10 +78,16 @@ class _FoodAiAppState extends State<FoodAiApp> {
       case 2:
         return 'Поиск';
       case 3:
+        return 'Ручной ввод';
+      case 4:
         return 'Прогресс';
       default:
         return 'FoodAI';
     }
+  }
+
+  void _setCurrentIndex(int index) {
+    setState(() => _currentIndex = index);
   }
 
   Future<void> _onAddFood() async {
@@ -131,7 +140,7 @@ class _FoodAiAppState extends State<FoodAiApp> {
 
     switch (action) {
       case _AddFoodAction.manual:
-        switchToHome(null);
+        _setCurrentIndex(3);
         break;
       case _AddFoodAction.camera:
         switchToHome(() => _homeKey.currentState?.startCameraScan());

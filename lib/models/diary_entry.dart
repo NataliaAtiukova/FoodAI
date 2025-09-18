@@ -14,6 +14,7 @@ class DiaryEntry extends HiveObject {
     required this.goal,
     required this.advice,
     required this.category,
+    required this.source,
     this.note,
     this.imagePath,
     this.labels,
@@ -29,6 +30,7 @@ class DiaryEntry extends HiveObject {
   String goal;
   String advice;
   MealCategory category;
+  String source;
   String? note;
   String? imagePath;
   List<String>? labels;
@@ -58,15 +60,16 @@ class DiaryEntryAdapter extends TypeAdapter<DiaryEntry> {
       advice: fields[8] as String,
       note: fields[9] as String?,
       category: MealCategoryExt.fromStorage(fields[10] as String?),
-      imagePath: fields[11] as String?,
-      labels: (fields[12] as List?)?.map((dynamic e) => e.toString()).toList(),
+      source: (fields[11] as String?) ?? 'Неизвестно',
+      imagePath: fields[12] as String?,
+      labels: (fields[13] as List?)?.map((dynamic e) => e.toString()).toList(),
     );
   }
 
   @override
   void write(BinaryWriter writer, DiaryEntry obj) {
     writer
-      ..writeByte(13)
+      ..writeByte(14)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -90,8 +93,10 @@ class DiaryEntryAdapter extends TypeAdapter<DiaryEntry> {
       ..writeByte(10)
       ..write(obj.category.storageValue)
       ..writeByte(11)
-      ..write(obj.imagePath)
+      ..write(obj.source)
       ..writeByte(12)
+      ..write(obj.imagePath)
+      ..writeByte(13)
       ..write(obj.labels);
   }
 }

@@ -11,7 +11,9 @@ import '../services/vision_service.dart';
 import 'results_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.onNavigateToTab});
+
+  final void Function(int index)? onNavigateToTab;
 
   @override
   State<HomeScreen> createState() => HomeScreenState();
@@ -25,6 +27,7 @@ class HomeScreenState extends State<HomeScreen> {
   List<VisionPrediction>? _latestPredictions;
   String? _lastImagePath;
   bool _isLoading = false;
+  String _pendingSource = 'Ручной ввод';
 
   @override
   void dispose() {
@@ -45,6 +48,7 @@ class HomeScreenState extends State<HomeScreen> {
 
       final file = File(picked.path);
       setState(() => _isLoading = true);
+      _pendingSource = 'Фото';
       final predictions = await VisionService.instance.analyzeFood(file);
       if (!mounted) {
         return;
@@ -67,11 +71,47 @@ class HomeScreenState extends State<HomeScreen> {
       _showSnackBar(e.message);
     } catch (e) {
       _showSnackBar('Не удалось распознать блюдо: $e');
+      await _offerManualFallback();
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  Future<void> _offerManualFallback() async {
+    if (!mounted) {
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Text(
+                'Не удалось распознать блюдо. Добавьте его вручную.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  widget.onNavigateToTab?.call(3);
+                },
+                child: const Text('Открыть ручной ввод'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<String?> _showPredictionSheet(List<VisionPrediction> predictions) async {
@@ -111,7 +151,7 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _calculate({String? queryOverride}) async {
+  Future<void> _calculate({String? queryOverride, String? source}) async {
     final query = (queryOverride ?? _controller.text).trim();
     if (query.isEmpty) {
       _showSnackBar('Введите название блюда.');
@@ -122,6 +162,10 @@ class HomeScreenState extends State<HomeScreen> {
       _isLoading = true;
       _latestAnalysis = null;
     });
+
+    if (source != null) {
+      _pendingSource = source;
+    }
 
     try {
       final analysis = await NutritionService.instance.analyzeWithAdvice(
@@ -141,6 +185,7 @@ class HomeScreenState extends State<HomeScreen> {
             goal: _selectedGoal,
             predictions: _latestPredictions,
             imagePath: _lastImagePath,
+            source: _pendingSource,
           ),
         ),
       );
@@ -248,7 +293,7 @@ class HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 24),
             FilledButton(
-              onPressed: _isLoading ? null : _calculate,
+              onPressed: _isLoading ? null : () => _calculate(source: 'Ручной ввод'),
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(
