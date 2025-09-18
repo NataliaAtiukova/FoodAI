@@ -1,5 +1,7 @@
 name: food_ai
 
+description: FoodAI (NutriGo) — Nutritionix + YandexGPT helper.
+
 publish_to: 'none'
 
 environment:
@@ -10,12 +12,17 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   flutter_dotenv: ^5.0.2
+  googleapis: ^13.1.0
+  googleapis_auth: ^1.6.0
+  image_picker: ^1.0.7
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  flutter_lints: ^3.0.1
 
 flutter:
   uses-material-design: true
   assets:
     - assets/keys/
+    - .env
