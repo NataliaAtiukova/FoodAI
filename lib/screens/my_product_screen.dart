@@ -13,6 +13,7 @@ class MyProductScreen extends StatefulWidget {
 class _MyProductScreenState extends State<MyProductScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _brandController = TextEditingController();
   final TextEditingController _caloriesController = TextEditingController();
   final TextEditingController _proteinController = TextEditingController();
   final TextEditingController _fatController = TextEditingController();
@@ -23,6 +24,7 @@ class _MyProductScreenState extends State<MyProductScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _brandController.dispose();
     _caloriesController.dispose();
     _proteinController.dispose();
     _fatController.dispose();
@@ -36,6 +38,7 @@ class _MyProductScreenState extends State<MyProductScreen> {
     }
 
     final name = _nameController.text.trim();
+    final brand = _brandController.text.trim();
     final double? calories = double.tryParse(_caloriesController.text.replaceAll(',', '.'));
     final double? protein = double.tryParse(_proteinController.text.replaceAll(',', '.'));
     final double? fat = double.tryParse(_fatController.text.replaceAll(',', '.'));
@@ -50,6 +53,7 @@ class _MyProductScreenState extends State<MyProductScreen> {
     try {
       await DiaryService.instance.addEntry(
         name: name,
+        brand: brand.isEmpty ? null : brand,
         calories: calories,
         protein: protein,
         fat: fat,
@@ -65,6 +69,7 @@ class _MyProductScreenState extends State<MyProductScreen> {
       _showSnackBar('Продукт добавлен.');
       _formKey.currentState?.reset();
       _nameController.clear();
+      _brandController.clear();
       _caloriesController.clear();
       _proteinController.clear();
       _fatController.clear();
@@ -111,6 +116,14 @@ class _MyProductScreenState extends State<MyProductScreen> {
                 ),
                 validator: (value) =>
                     value == null || value.trim().isEmpty ? 'Введите название' : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _brandController,
+                decoration: const InputDecoration(
+                  labelText: 'Бренд (необязательно)',
+                  border: OutlineInputBorder(),
+                ),
               ),
               const SizedBox(height: 12),
               TextFormField(

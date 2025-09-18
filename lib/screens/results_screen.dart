@@ -41,6 +41,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
       final facts = widget.analysis.result.facts;
       await DiaryService.instance.addEntry(
         name: widget.analysis.result.name,
+        brand: widget.analysis.result.brand,
         calories: facts.calories,
         protein: facts.protein,
         fat: facts.fat,

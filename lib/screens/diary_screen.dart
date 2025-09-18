@@ -245,6 +245,13 @@ class _DiaryEntryTile extends StatelessWidget {
                     entry.name,
                     style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                   ),
+                  if (entry.brand != null && entry.brand!.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 2),
+                    Text(
+                      entry.brand!,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
                   const SizedBox(height: 4),
                   Text(
                     '${entry.calories.toStringAsFixed(0)} ккал · $timeText',
@@ -266,6 +273,10 @@ class _DiaryEntryTile extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.edit_note_outlined),
               onPressed: () => _editNote(context, entry),
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => DiaryService.instance.deleteEntry(entry.id),
             ),
           ],
         ),

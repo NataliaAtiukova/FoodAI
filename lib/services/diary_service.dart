@@ -42,6 +42,7 @@ class DiaryService {
 
   Future<DiaryEntry> addEntry({
     required String name,
+    String? brand,
     required double calories,
     required double protein,
     required double fat,
@@ -66,6 +67,7 @@ class DiaryService {
       advice: advice,
       category: category,
       source: source,
+      brand: brand,
       timestamp: timestamp ?? DateTime.now(),
       imagePath: imagePath,
       labels: labels,

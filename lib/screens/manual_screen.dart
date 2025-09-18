@@ -98,6 +98,7 @@ class _ManualScreenState extends State<ManualScreen> {
 
       await DiaryService.instance.addEntry(
         name: food.name,
+        brand: null,
         calories: facts.calories,
         protein: facts.protein,
         fat: facts.fat,

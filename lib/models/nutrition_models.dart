@@ -15,6 +15,7 @@ class NutritionFacts {
 class NutritionResult {
   const NutritionResult({
     required this.name,
+    this.brand,
     required this.facts,
     this.servingQuantity,
     this.servingUnit,
@@ -22,6 +23,7 @@ class NutritionResult {
   });
 
   final String name;
+  final String? brand;
   final NutritionFacts facts;
   final double? servingQuantity;
   final String? servingUnit;

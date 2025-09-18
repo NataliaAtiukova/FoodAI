@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/diary_entry.dart';
 import '../models/meal_category.dart';
 import '../models/nutrition_models.dart';
 import '../models/search_food_item.dart';
@@ -105,6 +106,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
         await DiaryService.instance.addEntry(
           name: result.name,
+          brand: result.brand,
           calories: scaledFacts.calories,
           protein: scaledFacts.protein,
           fat: scaledFacts.fat,
@@ -184,6 +186,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
       await DiaryService.instance.addEntry(
         name: name,
+        brand: item.brand ?? analysis?.result.brand,
         calories: facts.calories,
         protein: facts.protein,
         fat: facts.fat,
@@ -306,6 +309,20 @@ class _SearchScreenState extends State<SearchScreen> {
     );
   }
 
+  DiaryEntry? _findMatchingEntry(List<DiaryEntry> entries, SearchFoodItem item) {
+    for (final entry in entries) {
+      final sameName = entry.name.toLowerCase() == item.name.toLowerCase();
+      final sourceMatches = entry.source.toLowerCase().contains('поиск');
+      final brandMatches = (item.brand == null || item.brand!.isEmpty)
+          ? (entry.brand == null || entry.brand!.isEmpty)
+          : (entry.brand?.toLowerCase() == item.brand!.toLowerCase());
+      if (sameName && brandMatches && sourceMatches) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
   void _showSnackBar(String message) {
     if (!mounted) {
       return;
@@ -407,23 +424,37 @@ class _SearchScreenState extends State<SearchScreen> {
               )
             else
               Expanded(
-                child: ListView.separated(
-                  itemCount: _results.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final item = _results[index];
-                    return ListTile(
-                      leading: item.thumbnailUrl != null
-                          ? CircleAvatar(backgroundImage: NetworkImage(item.thumbnailUrl!))
-                          : const CircleAvatar(child: Icon(Icons.restaurant_outlined)),
-                      title: Text(item.name),
-                      subtitle: item.brand == null || item.brand!.isEmpty
-                          ? null
-                          : Text(item.brand!),
-                      trailing: FilledButton.tonal(
-                        onPressed: _isAdding ? null : () => _addFood(item),
-                        child: const Text('Добавить'),
-                      ),
+                child: ValueListenableBuilder<Box<DiaryEntry>>(
+                  valueListenable: DiaryService.instance.listenable(),
+                  builder: (context, box, _) {
+                    final entries = box.values.toList();
+                    return ListView.separated(
+                      itemCount: _results.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final item = _results[index];
+                        final entry = _findMatchingEntry(entries, item);
+                        final isAdded = entry != null;
+                        return ListTile(
+                          leading: item.thumbnailUrl != null
+                              ? CircleAvatar(backgroundImage: NetworkImage(item.thumbnailUrl!))
+                              : const CircleAvatar(child: Icon(Icons.restaurant_outlined)),
+                          title: Text(item.name),
+                          subtitle: item.brand == null || item.brand!.isEmpty
+                              ? null
+                              : Text(item.brand!),
+                          trailing: isAdded
+                              ? OutlinedButton(
+                                  onPressed: () => DiaryService.instance.deleteEntry(entry!.id),
+                                  child: const Text('Убрать'),
+                                )
+                              : FilledButton.tonal(
+                                  onPressed:
+                                      _isAdding ? null : () => _addFood(item),
+                                  child: const Text('Добавить'),
+                                ),
+                        );
+                      },
                     );
                   },
                 ),

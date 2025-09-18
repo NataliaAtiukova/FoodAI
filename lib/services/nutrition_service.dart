@@ -93,6 +93,7 @@ class NutritionService {
 
     return NutritionResult(
       name: (first['food_name'] as String?)?.trim() ?? trimmed,
+      brand: (first['brand_name'] as String?)?.trim(),
       facts: facts,
       servingQuantity: (first['serving_qty'] as num?)?.toDouble(),
       servingUnit: first['serving_unit'] as String?,
@@ -232,8 +233,10 @@ class NutritionService {
     );
 
     final name = (product['product_name'] as String?)?.trim();
+    final brand = (product['brands'] as String?)?.split(',').first.trim();
     return NutritionResult(
       name: name == null || name.isEmpty ? 'Продукт по штрихкоду $trimmed' : name,
+      brand: brand,
       facts: facts,
       servingQuantity: 100,
       servingUnit: 'г',
