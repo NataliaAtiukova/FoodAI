@@ -1,6 +1,6 @@
 name: food_ai
 
-description: FoodAI (NutriGo) — Nutritionix + YandexGPT helper.
+description: FoodAI — сканирование упаковок с Yandex Vision и база Open Food Facts RU.
 
 publish_to: 'none'
 
@@ -10,15 +10,16 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   http: ^1.2.0
-  flutter_dotenv: ^5.0.2
-  googleapis: ^13.1.0
-  googleapis_auth: ^1.6.0
   image_picker: ^1.0.7
   shared_preferences: ^2.2.2
   fl_chart: ^0.66.2
-  intl: ^0.18.1
+  intl: ^0.19.0
   uuid: ^4.4.0
+  sqflite: ^2.3.0
+  path: ^1.8.3
 
 dev_dependencies:
   flutter_test:
@@ -27,6 +28,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  assets:
-    - assets/keys/
-    - .env

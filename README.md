@@ -1,57 +1,52 @@
-# FoodAI (NutriGo)
+# FoodAI
 
-FoodAI — Flutter-приложение, которое распознаёт блюда по фото, рассчитывает КБЖУ через Nutritionix и даёт советы от YandexGPT. Приложение хранит историю рациона в дневнике и показывает прогресс на наглядных графиках.
+FoodAI — Flutter-приложение, которое сканирует упаковки с помощью Yandex Vision OCR, ищет продукты в Open Food Facts RU и ведёт дневник питания с AI-подсказками.
 
 ## Возможности
 
-- Ввод блюда вручную, сканирование камерой или выбор фото из галереи (Google Cloud Vision).
-- Автоматический расчёт калорий, белков, жиров и углеводов (Nutritionix).
-- Советы по питанию от YandexGPT с учётом цели: Похудение, Набор мышц, ЗОЖ или Спорт.
-- Сохранение блюд в дневник с категориями (завтрак, обед, ужин, перекус), заметками и фото.
-- Поиск и добавление продуктов по базе Open Food Facts (включая штрихкод).
-- Предзаполненный список популярных блюд РФ и возможность задавать граммовку.
-- Свои продукты: ручной ввод калорий и БЖУ.
-- Дневные итоги и прогресс: график калорий за неделю и распределение БЖУ за день.
+- Сканирование текста на этикетке (камера/галерея) и быстрый поиск продукта в Open Food Facts.
+- Поиск по названию или штрихкоду без сторонних Nutritionix/Google Vision сервисов.
+- Мгновенное добавление продукта в дневник с возможностью редактировать граммовку и пересчёт КБЖУ.
+- Вкладка «AI Советы» с персональными рекомендациями по дневнику (YandexGPT или ChatGPT).
+- Вкладка «Рецепты» — подбор идей на основе выбранных продуктов из дневника.
+- Вкладка «План питания» — недельное меню под цель: похудение, набор массы или ЗОЖ.
+- Локальное хранение дневника и избранных продуктов, кеширование найденных позиций OFF.
 
 ## Быстрый старт
 
 ```bash
 flutter pub get
-flutter run
+flutter run \
+  --dart-define=YANDEX_IAM_TOKEN=... \
+  --dart-define=YANDEX_VISION_FOLDER_ID=...
 ```
 
-Перед запуском создайте `.env` в корне проекта и добавьте ключи сервисов:
+Дополнительные переменные (необязательно):
 
-```dotenv
-NUTRITIONIX_APP_ID=YOUR_NUTRITIONIX_APP_ID
-NUTRITIONIX_APP_KEY=YOUR_NUTRITIONIX_APP_KEY
-YANDEX_API_KEY=YOUR_YANDEX_GPT_API_KEY
-YANDEX_FOLDER_ID=YOUR_YANDEX_FOLDER_ID
-GOOGLE_VISION_KEY_PATH=assets/keys/vision_key.json
-```
+- `YANDEX_GPT_MODEL` — кастомная модель YandexGPT (`gpt://<folder-id>/yandexgpt/latest` по умолчанию).
+- `OPENAI_API_KEY` и `OPENAI_MODEL` — для использования ChatGPT вместо YandexGPT.
 
-Скопируйте JSON сервисного аккаунта Google Vision в `assets/keys/vision_key.json` (папка уже в `.gitignore`).
+Если ключи не заданы, приложение использует локальные заглушки для советов/рецептов/плана питания.
 
 ## Архитектура
 
-- `lib/services/vision_service.dart` — классификация изображений через Google Cloud Vision.
-- `lib/services/nutrition_service.dart` — Nutritionix + советы YandexGPT, поиск Open Food Facts.
-- `lib/services/diary_service.dart` — хранение в Hive, агрегаты по дням.
-- UI разбит на вкладки (`Home`, `Diary`, `Search`, `Блюда`, `Мой продукт`, `Progress`) и экран результатов `ResultsScreen`.
+- `lib/services/yandex_vision_service.dart` — OCR через Yandex Vision.
+- `lib/services/local_food_database_service.dart` — поиск и кеширование результатов Open Food Facts.
+- `lib/services/ai_content_service.dart` — генерация советов, рецептов и планов питания (YandexGPT/OpenAI + fallback).
+- `lib/services/diary_service_v2.dart` — хранение дневника в `SharedPreferences`, пересчёт КБЖУ.
+- UI разбит на вкладки нижней навигации: `Home` (сканер + поиск), `Search`, `Diary`, `Advice` (TabBar: AI Советы/Рецепты/План питания).
 
 ## Полезные команды
 
 ```bash
-# Проверка стиля
 flutter analyze
-
-# Запуск тестов
 flutter test
 ```
 
-## Отладка интеграций
+## Настройка интеграций
 
-- **Google Vision** — убедитесь, что billing включён в проекте Google Cloud и ключ имеет доступ к Vision API.
-- **Nutritionix** — используйте Application ID и Key из `.env` и следите за лимитами запросов.
-- **Open Food Facts** — API открытое, но штрихкоды и названия должны быть валидны; проверяйте, что продукт содержит необходимые нутриенты.
-- **YandexGPT** — проверьте, что сервис включён в каталоге `b1gggscveki4khab1snj` и ключ активен.
+- **Yandex Vision OCR** — получите IAM-токен и `folderId`, передайте через `--dart-define`.
+- **YandexGPT / ChatGPT** — для лучшего качества советов и планов добавьте соответствующие ключи.
+- **Open Food Facts** — используется публичный RU API, данные кешируются в локальной SQLite базе.
+
+Теперь проект полностью избавлен от Google Vision и Nutritionix.

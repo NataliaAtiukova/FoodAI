@@ -1,11 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
-import '../models/diary_entry.dart';
+import '../models/diary_entry_v2.dart';
 import '../models/meal_category.dart';
-import '../services/diary_service.dart';
+import '../services/diary_service_v2.dart';
 
 class DiaryScreen extends StatefulWidget {
   const DiaryScreen({super.key});
@@ -16,101 +17,154 @@ class DiaryScreen extends StatefulWidget {
 
 class _DiaryScreenState extends State<DiaryScreen> {
   final Set<MealCategory> _expanded = MealCategory.values.toSet();
+  DateTime _selectedDate = DateTime.now();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final today = DateTime.now();
-    final normalizedToday = DateTime(today.year, today.month, today.day);
+    final normalizedDate =
+        DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: ValueListenableBuilder<List<DiaryEntry>>(
-          valueListenable: DiaryService.instance.listenable(),
-          builder: (context, _, __) {
-            final grouped =
-                DiaryService.instance.entriesByCategory(normalizedToday);
-            final totals = DiaryService.instance.totalsForDay(normalizedToday);
-            final hasEntries = grouped.values.any((list) => list.isNotEmpty);
-            final timeFormat = DateFormat.Hm();
-
-            return SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
+        child: Column(
+          children: [
+            // Заголовок с выбором даты
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
                     'Мой дневник',
                     style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  const SizedBox(height: 16),
-                  for (final category in MealCategory.values)
-                    _CategorySection(
-                      category: category,
-                      entries: grouped[category] ?? const <DiaryEntry>[],
-                      expanded: _expanded.contains(category),
-                      onToggle: () {
-                        setState(() {
-                          if (_expanded.contains(category)) {
-                            _expanded.remove(category);
-                          } else {
-                            _expanded.add(category);
-                          }
-                        });
-                      },
-                      timeFormat: timeFormat,
-                    ),
-                  if (!hasEntries)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 48),
-                      child: Column(
-                        children: <Widget>[
-                          Icon(
-                            Icons.restaurant_menu,
-                            size: 48,
-                            color: theme.colorScheme.outline,
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'Пока нет записей. Добавьте блюдо из раздела Home.',
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ],
-                      ),
-                    ),
-                  const SizedBox(height: 24),
-                  Text(
-                    'Итоги за день',
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 12),
-                  if (totals != null)
-                    _TotalsCard(totals: totals)
-                  else
-                    _EmptyTotalsCard(),
-                ],
+                ),
+                IconButton(
+                  onPressed: _selectDate,
+                  icon: const Icon(Icons.calendar_today_outlined),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+
+            // Показываем выбранную дату
+            Text(
+              DateFormat('d MMMM yyyy', 'ru').format(_selectedDate),
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
               ),
-            );
-          },
+            ),
+            const SizedBox(height: 16),
+
+            // Основной контент
+            Expanded(
+              child: ValueListenableBuilder<List<DiaryEntryV2>>(
+                valueListenable: DiaryServiceV2.instance.listenable(),
+                builder: (context, _, __) =>
+                    _buildDiaryContent(normalizedDate),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+
+  Widget _buildDiaryContent(DateTime date) {
+    final theme = Theme.of(context);
+    final grouped = DiaryServiceV2.instance.getEntriesGroupedByCategory(date);
+    final summary = DiaryServiceV2.instance.getNutritionSummaryForDate(date);
+    final hasEntries = grouped.values.any((list) => list.isNotEmpty);
+    final timeFormat = DateFormat.Hm();
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // Категории приёмов пищи
+          for (final category in MealCategory.values)
+            _CategorySection(
+              category: category,
+              entries: grouped[category] ?? const <DiaryEntryV2>[],
+              expanded: _expanded.contains(category),
+              onToggle: () {
+                setState(() {
+                  if (_expanded.contains(category)) {
+                    _expanded.remove(category);
+                  } else {
+                    _expanded.add(category);
+                  }
+                });
+              },
+              onDiaryChanged: () => setState(() {}),
+              timeFormat: timeFormat,
+            ),
+
+          if (!hasEntries)
+            Padding(
+              padding: const EdgeInsets.only(top: 48),
+              child: Column(
+                children: <Widget>[
+                  Icon(
+                    Icons.restaurant_menu,
+                    size: 48,
+                    color: theme.colorScheme.outline,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Пока нет записей. Добавьте блюдо из раздела Home.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+
+          const SizedBox(height: 24),
+
+          // Итоги за день
+          Text(
+            'Итоги за день',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          if (hasEntries) _TotalsCard(summary: summary) else _EmptyTotalsCard(),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _selectDate() async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 365)),
+      lastDate: DateTime.now(),
+      locale: const Locale('ru'),
+    );
+
+    if (date != null) {
+      setState(() => _selectedDate = date);
+    }
+  }
 }
 
 class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({required this.totals});
+  const _TotalsCard({required this.summary});
 
-  final DailyTotals totals;
+  final Map<String, dynamic> summary;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final number = NumberFormat('#,##0');
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -123,11 +177,21 @@ class _TotalsCard extends StatelessWidget {
         runSpacing: 12,
         children: <Widget>[
           _Metric(
-              title: 'Калории',
-              value: '${number.format(totals.calories)} ккал'),
-          _Metric(title: 'Белки', value: '${number.format(totals.protein)} г'),
-          _Metric(title: 'Жиры', value: '${number.format(totals.fat)} г'),
-          _Metric(title: 'Углеводы', value: '${number.format(totals.carbs)} г'),
+            title: 'Калории',
+            value: '${number.format(summary['calories'])} ккал',
+          ),
+          _Metric(
+            title: 'Белки',
+            value: '${number.format(summary['protein'])} г',
+          ),
+          _Metric(
+            title: 'Жиры',
+            value: '${number.format(summary['fat'])} г',
+          ),
+          _Metric(
+            title: 'Углеводы',
+            value: '${number.format(summary['carbs'])} г',
+          ),
         ],
       ),
     );
@@ -146,7 +210,7 @@ class _EmptyTotalsCard extends StatelessWidget {
         border: Border.all(color: theme.colorScheme.outlineVariant),
       ),
       child: Text(
-        'Нет данных за сегодня. Добавьте блюдо, чтобы увидеть сводку.',
+        'Нет данных за выбранный день. Добавьте блюдо, чтобы увидеть сводку.',
         style: theme.textTheme.bodyMedium,
       ),
     );
@@ -159,18 +223,21 @@ class _CategorySection extends StatelessWidget {
     required this.entries,
     required this.expanded,
     required this.onToggle,
+    required this.onDiaryChanged,
     required this.timeFormat,
   });
 
   final MealCategory category;
-  final List<DiaryEntry> entries;
+  final List<DiaryEntryV2> entries;
   final bool expanded;
   final VoidCallback onToggle;
+  final VoidCallback onDiaryChanged;
   final DateFormat timeFormat;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -182,8 +249,9 @@ class _CategorySection extends StatelessWidget {
           onExpansionChanged: (_) => onToggle(),
           title: Text(
             category.displayName,
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
           childrenPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -201,8 +269,11 @@ class _CategorySection extends StatelessWidget {
                   .map(
                     (entry) => Padding(
                       padding: const EdgeInsets.only(bottom: 12),
-                      child:
-                          _DiaryEntryTile(entry: entry, timeFormat: timeFormat),
+                      child: _DiaryEntryTile(
+                        entry: entry,
+                        timeFormat: timeFormat,
+                        onDiaryChanged: onDiaryChanged,
+                      ),
                     ),
                   )
                   .toList(),
@@ -213,10 +284,15 @@ class _CategorySection extends StatelessWidget {
 }
 
 class _DiaryEntryTile extends StatelessWidget {
-  const _DiaryEntryTile({required this.entry, required this.timeFormat});
+  const _DiaryEntryTile({
+    required this.entry,
+    required this.timeFormat,
+    required this.onDiaryChanged,
+  });
 
-  final DiaryEntry entry;
+  final DiaryEntryV2 entry;
   final DateFormat timeFormat;
+  final VoidCallback onDiaryChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -228,6 +304,8 @@ class _DiaryEntryTile extends StatelessWidget {
     String format(double value) => value % 1 == 0
         ? wholeFormat.format(value)
         : decimalFormat.format(value);
+
+    final facts = entry.factsForCurrentServing;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -243,8 +321,9 @@ class _DiaryEntryTile extends StatelessWidget {
                 children: <Widget>[
                   Text(
                     entry.name,
-                    style: theme.textTheme.titleMedium
-                        ?.copyWith(fontWeight: FontWeight.w600),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   if (entry.brand != null &&
                       entry.brand!.isNotEmpty) ...<Widget>[
@@ -256,17 +335,17 @@ class _DiaryEntryTile extends StatelessWidget {
                   ],
                   const SizedBox(height: 4),
                   Text(
-                    '${format(entry.calories)} ккал · ${format(entry.grams)} г · $timeText',
+                    '${format(facts.calories)} ккал · ${format(entry.grams)} г · $timeText',
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Категория: ${entry.category.displayName} · Источник: ${entry.source}',
+                    'Источник: ${entry.source}',
                     style: theme.textTheme.bodySmall,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Б:${format(entry.protein)}г · Ж:${format(entry.fat)}г · У:${format(entry.carbs)}г',
+                    'Б:${format(facts.protein)}г · Ж:${format(facts.fat)}г · У:${format(facts.carbs)}г',
                     style: theme.textTheme.labelMedium,
                   ),
                 ],
@@ -282,7 +361,7 @@ class _DiaryEntryTile extends StatelessWidget {
             ),
             IconButton(
               icon: const Icon(Icons.delete_outline),
-              onPressed: () => DiaryService.instance.deleteEntry(entry.id),
+              onPressed: () => _deleteEntry(context, entry),
             ),
           ],
         ),
@@ -316,7 +395,7 @@ class _DiaryEntryTile extends StatelessWidget {
     );
   }
 
-  Future<void> _editNote(BuildContext context, DiaryEntry entry) async {
+  Future<void> _editNote(BuildContext context, DiaryEntryV2 entry) async {
     final controller = TextEditingController(text: entry.note);
     final result = await showModalBottomSheet<String>(
       context: context,
@@ -357,12 +436,13 @@ class _DiaryEntryTile extends StatelessWidget {
     );
 
     if (result != null) {
-      await DiaryService.instance
-          .updateNote(entry.id, result.isEmpty ? null : result);
+      final updatedEntry = entry.copyWith(note: result.isEmpty ? null : result);
+      await DiaryServiceV2.instance.updateEntry(updatedEntry);
+      onDiaryChanged();
     }
   }
 
-  Future<void> _editGrams(BuildContext context, DiaryEntry entry) async {
+  Future<void> _editGrams(BuildContext context, DiaryEntryV2 entry) async {
     final controller = TextEditingController(
       text: entry.grams % 1 == 0
           ? entry.grams.toStringAsFixed(0)
@@ -395,6 +475,9 @@ class _DiaryEntryTile extends StatelessWidget {
                 controller: controller,
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                ],
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   suffixText: 'г',
@@ -416,7 +499,35 @@ class _DiaryEntryTile extends StatelessWidget {
     );
 
     if (result != null && result > 0) {
-      await DiaryService.instance.updateGrams(entry.id, result);
+      final updatedEntry = entry.copyWith(grams: result);
+      await DiaryServiceV2.instance.updateEntry(updatedEntry);
+      onDiaryChanged();
+    }
+  }
+
+  Future<void> _deleteEntry(BuildContext context, DiaryEntryV2 entry) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Удалить запись?'),
+        content:
+            Text('Вы уверены, что хотите удалить "${entry.name}" из дневника?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await DiaryServiceV2.instance.removeEntry(entry.id);
+      onDiaryChanged();
     }
   }
 }
@@ -468,9 +579,12 @@ class _Metric extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(title,
-            style: theme.textTheme.labelLarge
-                ?.copyWith(fontWeight: FontWeight.w600)),
+        Text(
+          title,
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 4),
         Text(value, style: theme.textTheme.titleMedium),
       ],

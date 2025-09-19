@@ -3,7 +3,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:food_ai/main.dart';
-import 'package:food_ai/services/diary_service.dart';
+import 'package:food_ai/services/diary_service_v2.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -11,7 +11,7 @@ void main() {
   setUpAll(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
     await initializeDateFormatting('ru_RU');
-    await DiaryService.instance.init();
+    await DiaryServiceV2.instance.init();
   });
 
   testWidgets('bottom navigation switches between tabs', (tester) async {
@@ -29,6 +29,6 @@ void main() {
 
     await tester.tap(find.text('Advice'));
     await tester.pumpAndSettle();
-    expect(find.text('Советы по питанию'), findsOneWidget);
+    expect(find.text('AI помощник'), findsOneWidget);
   });
 }

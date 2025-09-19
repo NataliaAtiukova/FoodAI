@@ -5,139 +5,209 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
+import '../models/diary_entry_v2.dart';
+import '../models/local_food_item.dart';
 import '../models/meal_category.dart';
 import '../models/nutrition_models.dart';
-import '../models/vision_prediction.dart';
-import '../services/diary_service.dart';
-import '../services/nutrition_service.dart';
-import '../services/vision_service.dart';
+import '../services/diary_service_v2.dart';
+import '../services/local_food_database_service.dart';
+import '../services/yandex_vision_service.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.onNavigateToTab});
-
-  final void Function(int index)? onNavigateToTab;
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => HomeScreenState();
 }
 
 class HomeScreenState extends State<HomeScreen> {
-  final TextEditingController _controller = TextEditingController();
+  HomeScreenState();
+
   final ImagePicker _picker = ImagePicker();
-  NutritionResult? _latestResult;
-  List<VisionPrediction>? _latestPredictions;
+  final TextEditingController _manualController = TextEditingController();
+  final Map<String, TextEditingController> _gramControllers =
+      <String, TextEditingController>{};
+  final Map<String, double> _itemGrams = <String, double>{};
+
+  List<String> _recognizedCandidates = <String>[];
+  List<LocalFoodItem> _results = <LocalFoodItem>[];
+  bool _isScanning = false;
+  bool _isSearching = false;
+  bool _isAdding = false;
+  String? _activeQuery;
+  String _activeSourceLabel = 'Manual Search';
   String? _lastImagePath;
-  bool _isLoading = false;
-  String _pendingSource = 'Ручной ввод';
-  bool _savingToDiary = false;
-  String _lastAnalysisSource = 'Ручной ввод';
-  final TextEditingController _gramsController =
-      TextEditingController(text: '100');
-  double _grams = 100;
-  NutritionFacts? _baseFactsPer100g;
+  String? _scanError;
+
+  static const String _ocrSourceLabel = 'Yandex OCR';
+  static const String _manualSourceLabel = 'Manual Search';
 
   @override
   void dispose() {
-    _controller.dispose();
-    _gramsController.dispose();
+    _manualController.dispose();
+    for (final controller in _gramControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
-  Future<void> startCameraScan() => _handlePhoto(ImageSource.camera);
+  Future<void> _scanPackaging(ImageSource source) async {
+    if (_isScanning) return;
 
-  Future<void> startGalleryPick() => _handlePhoto(ImageSource.gallery);
-
-  Future<void> _handlePhoto(ImageSource source) async {
     try {
-      final XFile? picked = await _picker.pickImage(source: source);
-      if (picked == null) {
-        return;
-      }
-
-      final file = File(picked.path);
-      setState(() => _isLoading = true);
-      _pendingSource = 'Фото';
-      final predictions = await VisionService.instance.analyzeFood(file);
-      if (!mounted) {
-        return;
-      }
-
-      final choice = await _showPredictionSheet(predictions);
-      if (choice == null) {
-        setState(() => _isLoading = false);
-        return;
-      }
+      final XFile? picked =
+          await _picker.pickImage(source: source, imageQuality: 85);
+      if (picked == null) return;
 
       setState(() {
-        _controller.text = choice;
-        _latestPredictions = predictions;
-        _lastImagePath = file.path;
+        _isScanning = true;
+        _scanError = null;
       });
 
-      await _calculate(queryOverride: choice);
-    } on VisionException catch (e) {
-      _showSnackBar(e.message);
-    } catch (e) {
-      _showSnackBar('Не удалось распознать блюдо: $e');
-      await _offerManualFallback();
+      final file = File(picked.path);
+      _lastImagePath = file.path;
+
+      final ocrResult = await YandexVisionService.instance.recognizeText(file);
+      if (!mounted) return;
+
+      final candidates = _prepareCandidates(ocrResult.lines);
+      setState(() {
+        _recognizedCandidates = candidates;
+        if (candidates.isNotEmpty) {
+          _activeQuery = candidates.first;
+        }
+      });
+
+      if (candidates.isEmpty) {
+        _showSnackBar('Не удалось распознать продукт на фотографии.');
+        return;
+      }
+
+      await _search(candidates.first, sourceLabel: _ocrSourceLabel);
+    } on YandexVisionException catch (error) {
+      setState(() => _scanError = error.message);
+      _showSnackBar(error.message);
+    } catch (error) {
+      setState(() => _scanError = error.toString());
+      _showSnackBar('Ошибка распознавания: $error');
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() => _isScanning = false);
       }
     }
   }
 
-  Future<void> _addAnalysisToDiary() async {
-    final result = _latestResult;
-    final baseFacts = _baseFactsPer100g;
-    if (result == null || baseFacts == null || _savingToDiary) {
-      return;
-    }
+  List<String> _prepareCandidates(List<String> lines) {
+    final seen = <String>{};
+    final candidates = <String>[];
 
-    final grams = _grams;
-    if (grams <= 0) {
-      _showSnackBar('Укажите граммовку блюда.');
-      return;
-    }
-
-    final category = await _pickCategory();
-    if (category == null || !mounted) {
-      return;
-    }
-
-    setState(() => _savingToDiary = true);
-    try {
-      await DiaryService.instance.addEntry(
-        name: result.name,
-        brand: result.brand,
-        grams: grams,
-        caloriesPer100g: baseFacts.calories,
-        proteinPer100g: baseFacts.protein,
-        fatPer100g: baseFacts.fat,
-        carbsPer100g: baseFacts.carbs,
-        goal: 'Home',
-        advice: 'Добавлено из Home.',
-        category: category,
-        source: 'Home',
-        imagePath: _lastImagePath,
-        labels: _latestPredictions
-            ?.map((prediction) =>
-                '${prediction.label} (${prediction.confidencePercent()})')
-            .toList(),
-      );
-      if (!mounted) {
-        return;
+    for (final raw in lines) {
+      final line = raw.trim();
+      if (line.length < 3) continue;
+      if (RegExp(r'^[0-9\-]+$').hasMatch(line)) {
+        continue; // игнорируем штрихкоды
       }
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('Добавлено в дневник.')),
-        );
+      final normalized = line.toLowerCase();
+      if (seen.add(normalized)) {
+        candidates.add(line);
+      }
+    }
+
+    if (candidates.isEmpty) {
+      return lines
+          .where((line) => line.trim().isNotEmpty)
+          .map((line) => line.trim())
+          .toList(growable: false);
+    }
+
+    return candidates;
+  }
+
+  Future<void> _search(String query, {required String sourceLabel}) async {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty) {
+      _showSnackBar('Введите название продукта.');
+      return;
+    }
+
+    setState(() {
+      _isSearching = true;
+      _activeQuery = cleanQuery;
+      _activeSourceLabel = sourceLabel;
+    });
+
+    try {
+      final items =
+          await LocalFoodDatabaseService.instance.searchFoods(cleanQuery);
+
+      if (!mounted) return;
+      setState(() {
+        _results = items;
+        _syncControllers(items);
+      });
+
+      if (items.isEmpty) {
+        _showSnackBar('Продукт "$cleanQuery" не найден в Open Food Facts.');
+      }
     } catch (error) {
-      _showSnackBar('Не удалось сохранить: $error');
+      _showSnackBar('Ошибка поиска: $error');
     } finally {
       if (mounted) {
-        setState(() => _savingToDiary = false);
+        setState(() => _isSearching = false);
+      }
+    }
+  }
+
+  void _syncControllers(List<LocalFoodItem> items) {
+    final existingKeys = _gramControllers.keys.toSet();
+    final keepKeys = items.map(_itemKey).toSet();
+
+    for (final key in existingKeys.difference(keepKeys)) {
+      _gramControllers.remove(key)?.dispose();
+      _itemGrams.remove(key);
+    }
+
+    for (final item in items) {
+      final key = _itemKey(item);
+      _gramControllers.putIfAbsent(
+        key,
+        () => TextEditingController(text: _formatGrams(_gramsForItem(item))),
+      );
+    }
+  }
+
+  Future<void> _addFood(LocalFoodItem item) async {
+    if (_isAdding) return;
+
+    final grams = _gramsForItem(item);
+    final category = await _pickCategory();
+    if (category == null) return;
+
+    setState(() => _isAdding = true);
+
+    try {
+      final entry = DiaryEntryV2(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: item.name,
+        brand: item.brand,
+        grams: grams,
+        factsPer100g: item.factsPer100g,
+        timestamp: DateTime.now(),
+        category: category,
+        source: _activeSourceLabel,
+        imagePath:
+            _activeSourceLabel == _ocrSourceLabel ? _lastImagePath : null,
+      );
+
+      await DiaryServiceV2.instance.addEntry(entry);
+
+      if (!mounted) return;
+      _showSnackBar('"${item.name}" добавлен в дневник.');
+    } catch (error) {
+      _showSnackBar('Не удалось добавить продукт: $error');
+    } finally {
+      if (mounted) {
+        setState(() => _isAdding = false);
       }
     }
   }
@@ -152,7 +222,7 @@ class HomeScreenState extends State<HomeScreen> {
       ),
       builder: (context) {
         return StatefulBuilder(
-          builder: (context, setState) {
+          builder: (context, setModalState) {
             return Padding(
               padding: const EdgeInsets.all(20),
               child: Column(
@@ -169,7 +239,7 @@ class HomeScreenState extends State<HomeScreen> {
                       groupValue: selected,
                       onChanged: (value) {
                         if (value != null) {
-                          setState(() => selected = value);
+                          setModalState(() => selected = value);
                         }
                       },
                       title: Text(category.displayName),
@@ -178,7 +248,7 @@ class HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 12),
                   FilledButton(
                     onPressed: () => Navigator.of(context).pop(selected),
-                    child: const Text('Добавить'),
+                    child: const Text('Сохранить'),
                   ),
                 ],
               ),
@@ -189,138 +259,31 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _onGramsChanged(String value) {
-    final parsed = double.tryParse(value.replaceAll(',', '.'));
-    if (parsed == null || parsed <= 0) {
-      return;
-    }
-    setState(() => _grams = parsed);
-  }
+  String _itemKey(LocalFoodItem item) =>
+      '${item.name.toLowerCase()}|${item.brand?.toLowerCase() ?? ''}';
 
-  Future<void> _offerManualFallback() async {
-    if (!mounted) {
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              const Text(
-                'Не удалось распознать блюдо. Попробуйте добавить его через поиск Open Food Facts.',
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  widget.onNavigateToTab?.call(1);
-                },
-                icon: const Icon(Icons.search_outlined),
-                label: const Text('Перейти к поиску'),
-              ),
-            ],
-          ),
-        );
-      },
+  double _gramsForItem(LocalFoodItem item) => _itemGrams[_itemKey(item)] ?? 100;
+
+  TextEditingController _controllerForItem(LocalFoodItem item) {
+    final key = _itemKey(item);
+    return _gramControllers.putIfAbsent(
+      key,
+      () => TextEditingController(text: _formatGrams(_gramsForItem(item))),
     );
   }
 
-  Future<String?> _showPredictionSheet(
-      List<VisionPrediction> predictions) async {
-    if (predictions.isEmpty) {
-      return null;
-    }
-    if (predictions.length == 1) {
-      return predictions.first.label;
-    }
-
-    return showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: ListView.separated(
-            shrinkWrap: true,
-            padding: const EdgeInsets.all(16),
-            itemBuilder: (context, index) {
-              final prediction = predictions[index];
-              return ListTile(
-                leading: const Icon(Icons.restaurant_outlined),
-                title: Text(
-                  '${prediction.label} · ${prediction.confidencePercent()}',
-                ),
-                onTap: () => Navigator.of(context).pop(prediction.label),
-              );
-            },
-            separatorBuilder: (_, __) => const Divider(height: 0),
-            itemCount: predictions.length,
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _calculate({String? queryOverride, String? source}) async {
-    final query = (queryOverride ?? _controller.text).trim();
-    if (query.isEmpty) {
-      _showSnackBar('Введите название блюда.');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _latestResult = null;
-      if (source != null && source == 'Ручной ввод') {
-        _latestPredictions = null;
-        _lastImagePath = null;
-      }
-    });
-
-    if (source != null) {
-      _pendingSource = source;
-    }
-
-    try {
-      final result = await NutritionService.instance.fetchNutrition(query);
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _latestResult = result;
-        _lastAnalysisSource = _pendingSource;
-        _baseFactsPer100g = result.facts;
-        _grams = 100;
-        _gramsController.text = '100';
-      });
-      _pendingSource = 'Ручной ввод';
-    } on NutritionException catch (e) {
-      _showSnackBar(e.message);
-    } catch (e) {
-      _showSnackBar('Ошибка анализа: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+  void _updateGrams(LocalFoodItem item, String raw) {
+    final parsed = double.tryParse(raw.replaceAll(',', '.'));
+    if (parsed != null && parsed > 0) {
+      setState(() => _itemGrams[_itemKey(item)] = parsed);
     }
   }
+
+  String _formatGrams(double value) =>
+      value % 1 == 0 ? value.toStringAsFixed(0) : value.toStringAsFixed(1);
 
   void _showSnackBar(String message) {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
@@ -329,317 +292,433 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final numberFormat = NumberFormat('#,##0');
-    final baseFacts = _baseFactsPer100g;
+    final yandexConfigured = YandexVisionService.instance.isConfigured;
 
     return SafeArea(
-      child: SingleChildScrollView(
+      child: ListView(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Text(
-              'Что вы ели?',
-              style: theme.textTheme.titleMedium,
+        children: <Widget>[
+          Text(
+            'Сканирование упаковки',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.w600,
             ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _controller,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText:
-                    'Например: 1 яблоко, 2 ломтика хлеба, 100 г куриной грудки',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Используйте камеру, чтобы распознать текст на этикетке и найти продукт в Open Food Facts.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (!yandexConfigured)
+            const _InfoBanner(
+              icon: Icons.cloud_off_outlined,
+              message:
+                  'Yandex Vision не настроен. Передайте YANDEX_IAM_TOKEN и YANDEX_VISION_FOLDER_ID через --dart-define, чтобы активировать OCR.',
+            ),
+          if (_scanError != null)
+            _InfoBanner(
+              icon: Icons.error_outline,
+              message: _scanError!,
+              tone: InfoTone.error,
+            ),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: yandexConfigured && !_isScanning
+                      ? () => _scanPackaging(ImageSource.camera)
+                      : null,
+                  icon: _isScanning
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2.5),
+                        )
+                      : const Icon(Icons.document_scanner_outlined),
+                  label:
+                      Text(_isScanning ? 'Сканирование…' : 'Сфотографировать'),
                 ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: yandexConfigured && !_isScanning
+                      ? () => _scanPackaging(ImageSource.gallery)
+                      : null,
+                  icon: const Icon(Icons.photo_library_outlined),
+                  label: const Text('Из галереи'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          if (_recognizedCandidates.isNotEmpty)
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  'Распознанный текст',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _recognizedCandidates
+                      .map(
+                        (candidate) => ChoiceChip(
+                          label: Text(candidate),
+                          selected: _activeQuery == candidate,
+                          onSelected: (selected) {
+                            if (selected) {
+                              _search(candidate, sourceLabel: _ocrSourceLabel);
+                            }
+                          },
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 24),
+              ],
             ),
-            const SizedBox(height: 12),
+          Text(
+            'Поиск вручную',
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _manualController,
+            textInputAction: TextInputAction.search,
+            onSubmitted: (value) =>
+                _search(value, sourceLabel: _manualSourceLabel),
+            decoration: InputDecoration(
+              hintText: 'Введите название продукта и нажмите поиск',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              suffixIcon: IconButton(
+                onPressed: _isSearching
+                    ? null
+                    : () => _search(_manualController.text,
+                        sourceLabel: _manualSourceLabel),
+                icon: _isSearching
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      )
+                    : const Icon(Icons.search_outlined),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          if (_results.isEmpty && !_isSearching)
+            const _InfoBanner(
+              icon: Icons.info_outline,
+              message:
+                  'Отсканируйте упаковку или выполните поиск, чтобы найти продукт.',
+              tone: InfoTone.muted,
+            )
+          else
+            ..._results.map(_buildResultCard),
+          const SizedBox(height: 80),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResultCard(LocalFoodItem item) {
+    final theme = Theme.of(context);
+    final number = NumberFormat('#,##0');
+    final decimal = NumberFormat('#,##0.0');
+    final grams = _gramsForItem(item);
+    final scaledFacts = NutritionFacts(
+      calories: item.factsPer100g.calories * grams / 100,
+      protein: item.factsPer100g.protein * grams / 100,
+      fat: item.factsPer100g.fat * grams / 100,
+      carbs: item.factsPer100g.carbs * grams / 100,
+    );
+    final controller = _controllerForItem(item);
+
+    String format(double value) =>
+        value % 1 == 0 ? number.format(value) : decimal.format(value);
+
+    final assistantNote = _buildAssistantNote(item, scaledFacts, grams);
+
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 20),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(24),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _isLoading ? null : startCameraScan,
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    label: const Text('Сканировать еду'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        item.name,
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Total Calories',
+                        style: theme.textTheme.labelMedium,
+                      ),
+                      Text(
+                        '${format(scaledFacts.calories)} ккал',
+                        style: theme.textTheme.displaySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (item.brand != null && item.brand!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            item.brand!,
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _isLoading ? null : startGalleryPick,
-                    icon: const Icon(Icons.photo_library_outlined),
-                    label: const Text('Выбрать фото'),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                    ),
+                SizedBox(
+                  width: 140,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: <Widget>[
+                      Align(
+                        alignment: Alignment.topRight,
+                        child: Chip(
+                          avatar: const Icon(Icons.qr_code_scanner, size: 18),
+                          label: Text(_activeSourceLabel),
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controller,
+                        textAlign: TextAlign.end,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: <TextInputFormatter>[
+                          FilteringTextInputFormatter.allow(
+                              RegExp(r'[0-9.,]')),
+                        ],
+                        decoration: InputDecoration(
+                          labelText: 'Граммовка',
+                          suffixText: 'г',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        onChanged: (value) => _updateGrams(item, value),
+                        onEditingComplete: () {
+                          _updateGrams(item, controller.text);
+                          FocusScope.of(context).unfocus();
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 24),
-            FilledButton(
-              onPressed:
-                  _isLoading ? null : () => _calculate(source: 'Ручной ввод'),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
+            Row(
+              children: <Widget>[
+                _MacroTile(
+                  label: 'Protein',
+                  value: '${format(scaledFacts.protein)} г',
                 ),
-              ),
-              child: _isLoading
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    )
-                  : const Text('Посчитать'),
+                _MacroTile(
+                  label: 'Fat',
+                  value: '${format(scaledFacts.fat)} г',
+                ),
+                _MacroTile(
+                  label: 'Carbs',
+                  value: '${format(scaledFacts.carbs)} г',
+                ),
+              ],
             ),
-            if (_latestResult != null && baseFacts != null) ...<Widget>[
-              const SizedBox(height: 24),
-              Text(
-                'Результат анализа',
-                style: theme.textTheme.titleMedium,
+            const SizedBox(height: 20),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.secondaryContainer
+                    .withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(20),
               ),
-              const SizedBox(height: 12),
-              _SummaryCard(
-                result: _latestResult!,
-                imagePath: _lastImagePath,
-                predictions: _latestPredictions,
-                numberFormat: numberFormat,
-                sourceLabel: _lastAnalysisSource,
-                baseFacts: baseFacts,
-                grams: _grams,
-                gramsController: _gramsController,
-                onGramsChanged: _onGramsChanged,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  CircleAvatar(
+                    radius: 20,
+                    backgroundColor:
+                        theme.colorScheme.primaryContainer.withValues(alpha: 0.6),
+                    child: Icon(
+                      Icons.psychology_outlined,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'FoodAI Assistant',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          assistantNote,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _savingToDiary ? null : _addAnalysisToDiary,
-                icon: _savingToDiary
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2.5),
-                      )
-                    : const Icon(Icons.add_task),
-                label:
-                    Text(_savingToDiary ? 'Добавление…' : 'Добавить в дневник'),
-              ),
-            ],
+            ),
+            const SizedBox(height: 20),
+            FilledButton(
+              onPressed: _isAdding ? null : () => _addFood(item),
+              child: Text(_isAdding ? 'Сохранение…' : 'Сохранить в дневник'),
+            ),
           ],
         ),
       ),
     );
   }
-}
 
-class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({
-    required this.result,
-    required this.imagePath,
-    required this.predictions,
-    required this.numberFormat,
-    required this.sourceLabel,
-    required this.baseFacts,
-    required this.grams,
-    required this.gramsController,
-    required this.onGramsChanged,
-  });
+  String _buildAssistantNote(
+    LocalFoodItem item,
+    NutritionFacts facts,
+    double grams,
+  ) {
+    final buffer = StringBuffer();
+    final number = NumberFormat('#,##0.0');
+    final caloriesText = facts.calories % 1 == 0
+        ? facts.calories.toStringAsFixed(0)
+        : number.format(facts.calories);
 
-  final NutritionResult result;
-  final String? imagePath;
-  final List<VisionPrediction>? predictions;
-  final NumberFormat numberFormat;
-  final String sourceLabel;
-  final NutritionFacts baseFacts;
-  final double grams;
-  final TextEditingController gramsController;
-  final ValueChanged<String> onGramsChanged;
+    buffer.write(
+        'Порция ${item.name.toLowerCase()} на ${_formatGrams(grams)} г даёт $caloriesText ккал. ');
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final macroFormat = NumberFormat('#,##0.0');
-
-    String formatValue(double value) {
-      return value % 1 == 0
-          ? numberFormat.format(value)
-          : macroFormat.format(value);
+    if (facts.protein >= 25) {
+      buffer.write('Отличный источник белка — поддержит восстановление и сытость. ');
+    } else if (facts.protein <= 10) {
+      buffer.write('Белка немного, добавьте яйцо, рыбу или творог для баланса. ');
     }
 
-    final scaledFacts = NutritionFacts(
-      calories: baseFacts.calories * grams / 100,
-      protein: baseFacts.protein * grams / 100,
-      fat: baseFacts.fat * grams / 100,
-      carbs: baseFacts.carbs * grams / 100,
-    );
-    final gramsText = formatValue(grams);
+    if (facts.fat >= facts.carbs && facts.fat > 20) {
+      buffer.write('Блюдо довольно жирное, постарайтесь сочетать его со свежими овощами. ');
+    } else if (facts.carbs > facts.fat && facts.carbs > 40) {
+      buffer.write('Углеводов много — подойдут цельнозерновые гарниры или салат для клетчатки. ');
+    }
 
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      elevation: 0,
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              result.name,
-              style: theme.textTheme.titleMedium
-                  ?.copyWith(fontWeight: FontWeight.bold),
-            ),
-            if (result.brand != null && result.brand!.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 6),
-              Text(
-                result.brand!,
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-            const SizedBox(height: 8),
-            Text(
-              'Источник: $sourceLabel',
-              style: theme.textTheme.bodySmall,
-            ),
-            if (imagePath != null && File(imagePath!).existsSync()) ...<Widget>[
-              const SizedBox(height: 12),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: Image.file(
-                  File(imagePath!),
-                  height: 140,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ],
-            const SizedBox(height: 12),
-            Text(
-              'Пищевая ценность на 100 г',
-              style: theme.textTheme.labelLarge
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: <Widget>[
-                _SummaryMetric(
-                  title: 'Калории',
-                  value: '${formatValue(baseFacts.calories)} ккал',
-                ),
-                _SummaryMetric(
-                  title: 'Белки',
-                  value: '${formatValue(baseFacts.protein)} г',
-                ),
-                _SummaryMetric(
-                  title: 'Жиры',
-                  value: '${formatValue(baseFacts.fat)} г',
-                ),
-                _SummaryMetric(
-                  title: 'Углеводы',
-                  value: '${formatValue(baseFacts.carbs)} г',
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: gramsController,
-              keyboardType:
-                  const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: <TextInputFormatter>[
-                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-              ],
-              decoration: InputDecoration(
-                labelText: 'Граммовка',
-                suffixText: 'г',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              onChanged: onGramsChanged,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Итого для $gramsText г',
-              style: theme.textTheme.labelLarge
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: <Widget>[
-                _SummaryMetric(
-                  title: 'Калории',
-                  value: '${formatValue(scaledFacts.calories)} ккал',
-                ),
-                _SummaryMetric(
-                  title: 'Белки',
-                  value: '${formatValue(scaledFacts.protein)} г',
-                ),
-                _SummaryMetric(
-                  title: 'Жиры',
-                  value: '${formatValue(scaledFacts.fat)} г',
-                ),
-                _SummaryMetric(
-                  title: 'Углеводы',
-                  value: '${formatValue(scaledFacts.carbs)} г',
-                ),
-              ],
-            ),
-            if (predictions != null && predictions!.isNotEmpty) ...<Widget>[
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 8,
-                runSpacing: 6,
-                children: predictions!
-                    .take(6)
-                    .map(
-                      (prediction) => Chip(
-                        label: Text(
-                          '${prediction.label} · ${prediction.confidencePercent()}',
-                        ),
-                        visualDensity: VisualDensity.compact,
-                      ),
-                    )
-                    .toList(),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+    buffer.write('Контролируйте размер порции и запланируйте оставшиеся приёмы пищи, чтобы уложиться в дневную норму калорий.');
+
+    return buffer.toString();
   }
 }
 
-class _SummaryMetric extends StatelessWidget {
-  const _SummaryMetric({required this.title, required this.value});
+class _MacroTile extends StatelessWidget {
+  const _MacroTile({required this.label, required this.value});
 
-  final String title;
+  final String label;
   final String value;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Container(
-      width: 150,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
+    return Expanded(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(title, style: theme.textTheme.labelMedium),
-          const SizedBox(height: 6),
+          Text(label, style: theme.textTheme.labelMedium),
+          const SizedBox(height: 4),
           Text(
             value,
-            style: theme.textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.bold),
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+enum InfoTone { normal, muted, error }
+
+class _InfoBanner extends StatelessWidget {
+  const _InfoBanner({
+    required this.icon,
+    required this.message,
+    this.tone = InfoTone.normal,
+  });
+
+  final IconData icon;
+  final String message;
+  final InfoTone tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    Color background;
+    Color textColor;
+
+    switch (tone) {
+      case InfoTone.muted:
+        background = colorScheme.surface.withValues(alpha: 0.35);
+        textColor = colorScheme.onSurfaceVariant;
+        break;
+      case InfoTone.error:
+        background = colorScheme.errorContainer;
+        textColor = colorScheme.onErrorContainer;
+        break;
+      case InfoTone.normal:
+        background = colorScheme.secondaryContainer.withValues(alpha: 0.3);
+        textColor = colorScheme.onSecondaryContainer;
+        break;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Icon(icon, color: textColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: theme.textTheme.bodyMedium?.copyWith(color: textColor),
+            ),
           ),
         ],
       ),
