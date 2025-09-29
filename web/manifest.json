@@ -1,6 +1,6 @@
 {
-    "name": "food_ai",
-    "short_name": "food_ai",
+    "name": "FoodAI: Счётчик калорий и питание",
+    "short_name": "FoodAI",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
