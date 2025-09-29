@@ -1,16 +1,25 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'package:food_ai/services/diary_service_v2.dart';
 import 'package:food_ai/models/diary_entry_v2.dart';
 import 'package:food_ai/models/meal_category.dart';
 import 'package:food_ai/models/nutrition_models.dart';
+import 'package:food_ai/services/app_database.dart';
+import 'package:food_ai/services/diary_service_v2.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUp(() async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+
+    final dbPath = await databaseFactory.getDatabasesPath();
+    await databaseFactory.deleteDatabase(p.join(dbPath, 'foodai_app.db'));
+    await AppDatabase.instance.close();
     DiaryServiceV2.instance.resetForTesting();
   });
 
@@ -36,10 +45,6 @@ void main() {
     );
 
     await service.addEntry(entry);
-
-    final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString('diary_entries_v2');
-    expect(stored, isNotNull);
 
     service.resetForTesting();
     await service.init();

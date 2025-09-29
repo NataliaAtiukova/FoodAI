@@ -1,23 +1,36 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'screens/ai_assistant_screen.dart';
 import 'screens/diary_screen.dart';
 import 'screens/home_screen.dart';
-import 'screens/advice_screen.dart';
-import 'screens/progress_screen.dart';
+import 'screens/saved_screen.dart';
+import 'screens/search_screen.dart';
+import 'services/ai_history_service.dart';
 import 'services/diary_service_v2.dart';
 import 'services/local_food_database_service.dart';
-import 'services/progress_service.dart';
+
+const Color _brandGreen = Color(0xFF2A825A);
+
+const NavigationDestinationLabelBehavior _labelBehavior =
+    NavigationDestinationLabelBehavior.alwaysShow;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  try {
+    await dotenv.load(fileName: '.env');
+  } catch (_) {
+    // .env may be absent in CI/production; fall back to --dart-define only
+  }
+
   // Инициализируем локальные сервисы
   await DiaryServiceV2.instance.init();
+  await AiHistoryService.instance.init();
   await LocalFoodDatabaseService.instance.initialize();
-  await ProgressService.instance.init();
   await initializeDateFormatting('ru');
   Intl.defaultLocale = 'ru';
 
@@ -36,13 +49,14 @@ class _FoodAiAppState extends State<FoodAiApp> {
 
   @override
   Widget build(BuildContext context) {
-    final tabs = <Widget>[
+    final pages = <Widget>[
       const HomeScreen(),
+      const SearchScreen(),
       const DiaryScreen(),
-      const AdviceScreen(),
-      const ProgressScreen(),
+      const AiAssistantScreen(),
+      const SavedScreen(),
     ];
-    final int currentIndex = _currentIndex.clamp(0, tabs.length - 1).toInt();
+    final clampedIndex = _currentIndex.clamp(0, pages.length - 1).toInt();
 
     return MaterialApp(
       title: 'FoodAI',
@@ -58,59 +72,80 @@ class _FoodAiAppState extends State<FoodAiApp> {
       ],
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.green),
-        scaffoldBackgroundColor: Colors.white,
-        snackBarTheme:
-            const SnackBarThemeData(behavior: SnackBarBehavior.floating),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: _brandGreen,
+          brightness: Brightness.light,
+        ),
+        snackBarTheme: const SnackBarThemeData(
+          behavior: SnackBarBehavior.floating,
+        ),
+        navigationBarTheme: NavigationBarThemeData(
+          height: 70,
+          backgroundColor: Colors.white,
+          indicatorColor: _brandGreen.withValues(alpha: 0.12),
+          labelBehavior: _labelBehavior,
+        ),
       ),
       home: Scaffold(
-        appBar: AppBar(
-          title: Text(_titleForIndex(currentIndex)),
-          centerTitle: true,
-        ),
         body: IndexedStack(
-          index: currentIndex,
-          children: tabs,
+          index: clampedIndex,
+          children: pages,
         ),
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: currentIndex,
-          selectedItemColor: Theme.of(context).colorScheme.primary,
-          onTap: (index) => setState(() => _currentIndex = index),
-          items: const <BottomNavigationBarItem>[
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: clampedIndex,
+          onDestinationSelected: (index) =>
+              setState(() => _currentIndex = index),
+          destinations: const <NavigationDestination>[
+            NavigationDestination(
+              icon: _EmojiIcon('🏠'),
+              selectedIcon: _EmojiIcon('🏠', selected: true),
               label: 'Home',
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.book_outlined),
+            NavigationDestination(
+              icon: _EmojiIcon('🔍'),
+              selectedIcon: _EmojiIcon('🔍', selected: true),
+              label: 'Search',
+            ),
+            NavigationDestination(
+              icon: _EmojiIcon('📒'),
+              selectedIcon: _EmojiIcon('📒', selected: true),
               label: 'Diary',
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.lightbulb_outline),
-              label: 'Advice',
+            NavigationDestination(
+              icon: _EmojiIcon('🤖'),
+              selectedIcon: _EmojiIcon('🤖', selected: true),
+              label: 'AI',
             ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.insights_outlined),
-              label: 'Progress',
+            NavigationDestination(
+              icon: _EmojiIcon('⭐'),
+              selectedIcon: _EmojiIcon('⭐', selected: true),
+              label: 'Saved',
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  String _titleForIndex(int index) {
-    switch (index) {
-      case 0:
-        return 'FoodAI';
-      case 1:
-        return 'Мой дневник';
-      case 2:
-        return 'Советы';
-      case 3:
-        return 'Прогресс';
-      default:
-        return 'FoodAI';
-    }
+class _EmojiIcon extends StatelessWidget {
+  const _EmojiIcon(this.emoji, {this.selected = false});
+
+  final String emoji;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = selected
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurfaceVariant;
+    return Text(
+      emoji,
+      style: TextStyle(
+        fontSize: 20,
+        color: color,
+      ),
+    );
   }
 }

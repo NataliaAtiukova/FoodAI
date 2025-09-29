@@ -2,10 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 
 import '../models/diary_entry_v2.dart';
 import '../models/meal_category.dart';
 import '../models/nutrition_models.dart';
+import 'app_database.dart';
 
 class DiaryServiceV2Exception implements Exception {
   DiaryServiceV2Exception(this.message);
@@ -21,6 +23,7 @@ class DiaryServiceV2 {
 
   static const String _diaryKey = 'diary_entries_v2';
   static const String _legacyDiaryKey = 'diary_entries_v1';
+
   List<DiaryEntryV2> _entries = [];
   bool _isInitialized = false;
   final ValueNotifier<List<DiaryEntryV2>> _entriesNotifier =
@@ -30,42 +33,33 @@ class DiaryServiceV2 {
     if (_isInitialized) return;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      try {
-        await prefs.reload();
-      } catch (_) {
-        // reload недоступен на некоторых платформах (iOS/Android)
-      }
-      final entriesJson = prefs.getString(_diaryKey);
-
-      if (entriesJson != null) {
-        final List<dynamic> entriesList = jsonDecode(entriesJson);
-        _entries = entriesList
-            .map((json) => DiaryEntryV2.fromJson(json as Map<String, dynamic>))
-            .toList();
-        _sortEntries();
-        debugPrint('DiaryServiceV2:init loaded ${_entries.length} entries');
-      } else {
-        final migrated = await _tryMigrateLegacyEntries(prefs);
-        if (!migrated) {
-          _entries = [];
+      final db = await AppDatabase.instance.database;
+      await _loadFromDatabase(db);
+      if (_entries.isEmpty) {
+        final migrated = await _tryMigrateFromPreferences(db);
+        if (migrated) {
+          await _loadFromDatabase(db);
         }
       }
-
       _isInitialized = true;
       _notifyListeners();
-    } catch (e) {
-      throw DiaryServiceV2Exception('Ошибка инициализации дневника: $e');
+    } catch (error) {
+      throw DiaryServiceV2Exception('Ошибка инициализации дневника: $error');
     }
   }
 
   Future<void> addEntry(DiaryEntryV2 entry) async {
     if (!_isInitialized) await init();
 
+    final db = await AppDatabase.instance.database;
+    await db.insert(
+      'diary_entries',
+      _toDbMap(entry),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
     _entries.add(entry);
     _sortEntries();
     _notifyListeners();
-    await _saveEntries();
     debugPrint('DiaryServiceV2:add stored ${_entries.length} entries');
   }
 
@@ -73,23 +67,33 @@ class DiaryServiceV2 {
     if (!_isInitialized) await init();
 
     final index = _entries.indexWhere((e) => e.id == entry.id);
-    if (index != -1) {
-      _entries[index] = entry;
-      _sortEntries();
-      _notifyListeners();
-      await _saveEntries();
-      debugPrint('DiaryServiceV2:update entry ${entry.id}');
+    if (index == -1) {
+      return;
     }
+
+    final db = await AppDatabase.instance.database;
+    await db.update(
+      'diary_entries',
+      _toDbMap(entry),
+      where: 'id = ?',
+      whereArgs: [entry.id],
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    _entries[index] = entry;
+    _sortEntries();
+    _notifyListeners();
+    debugPrint('DiaryServiceV2:update entry ${entry.id}');
   }
 
   Future<void> removeEntry(String id) async {
     if (!_isInitialized) await init();
 
     final before = _entries.length;
+    final db = await AppDatabase.instance.database;
+    await db.delete('diary_entries', where: 'id = ?', whereArgs: [id]);
     _entries.removeWhere((entry) => entry.id == id);
     _sortEntries();
     _notifyListeners();
-    await _saveEntries();
     if (before != _entries.length) {
       debugPrint('DiaryServiceV2:remove entry $id, left ${_entries.length}');
     }
@@ -159,23 +163,11 @@ class DiaryServiceV2 {
     };
   }
 
-  Future<void> _saveEntries({SharedPreferences? existingPrefs}) async {
-    try {
-      final prefs = existingPrefs ?? await SharedPreferences.getInstance();
-      final entriesJson = jsonEncode(_entries.map((e) => e.toJson()).toList());
-      final ok = await prefs.setString(_diaryKey, entriesJson);
-      if (!ok) {
-        debugPrint('DiaryServiceV2: setString returned false for $_diaryKey');
-      }
-    } catch (e) {
-      throw DiaryServiceV2Exception('Ошибка сохранения дневника: $e');
-    }
-  }
-
   Future<void> clearAllEntries() async {
+    final db = await AppDatabase.instance.database;
+    await db.delete('diary_entries');
     _entries.clear();
     _notifyListeners();
-    await _saveEntries();
   }
 
   ValueListenable<List<DiaryEntryV2>> listenable() {
@@ -194,40 +186,126 @@ class DiaryServiceV2 {
     _notifyListeners();
   }
 
-  Future<bool> _tryMigrateLegacyEntries(SharedPreferences prefs) async {
-    final legacyJson = prefs.getString(_legacyDiaryKey);
-    if (legacyJson == null || legacyJson.isEmpty) {
-      return false;
-    }
+  Future<void> _loadFromDatabase(Database db) async {
+    final rows = await db.query(
+      'diary_entries',
+      orderBy: 'timestamp DESC',
+    );
+    _entries = rows.map(_fromDbMap).toList();
+    _sortEntries();
+  }
 
+  Future<bool> _tryMigrateFromPreferences(Database db) async {
     try {
-      final decoded = jsonDecode(legacyJson);
-      if (decoded is! List) {
-        return false;
+      final prefs = await SharedPreferences.getInstance();
+      try {
+        await prefs.reload();
+      } catch (_) {
+        // reload недоступен на некоторых платформах (iOS/Android)
       }
 
-      final migrated = <DiaryEntryV2>[];
-      for (final item in decoded) {
-        if (item is! Map<String, dynamic>) continue;
-        final entry = _legacyEntryFromJson(item);
-        if (entry != null) {
-          migrated.add(entry);
+      final migratedEntries = <DiaryEntryV2>[];
+      final modernJson = prefs.getString(_diaryKey);
+      if (modernJson != null && modernJson.isNotEmpty) {
+        final decoded = jsonDecode(modernJson);
+        if (decoded is List) {
+          migratedEntries.addAll(
+            decoded
+                .whereType<Map<String, dynamic>>()
+                .map(DiaryEntryV2.fromJson),
+          );
         }
       }
 
-      if (migrated.isEmpty) {
+      final legacyJson = prefs.getString(_legacyDiaryKey);
+      if (legacyJson != null && legacyJson.isNotEmpty) {
+        final decoded = jsonDecode(legacyJson);
+        if (decoded is List) {
+          for (final item in decoded) {
+            if (item is! Map<String, dynamic>) continue;
+            final entry = _legacyEntryFromJson(item);
+            if (entry != null) {
+              migratedEntries.add(entry);
+            }
+          }
+        }
+      }
+
+      if (migratedEntries.isEmpty) {
         return false;
       }
 
-      migrated.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      _entries = migrated;
-      await _saveEntries(existingPrefs: prefs);
+      final batch = db.batch();
+      for (final entry in migratedEntries) {
+        batch.insert(
+          'diary_entries',
+          _toDbMap(entry),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+
+      await batch.commit(noResult: true);
+      await prefs.remove(_diaryKey);
       await prefs.remove(_legacyDiaryKey);
-      debugPrint('DiaryServiceV2: migrated ${migrated.length} legacy entries');
+
+      debugPrint(
+        'DiaryServiceV2: migrated ${migratedEntries.length} entries to SQLite',
+      );
       return true;
-    } catch (_) {
+    } catch (error) {
+      debugPrint('DiaryServiceV2: failed to migrate legacy entries: $error');
       return false;
     }
+  }
+
+  Map<String, Object?> _toDbMap(DiaryEntryV2 entry) => <String, Object?>{
+        'id': entry.id,
+        'name': entry.name,
+        'brand': entry.brand,
+        'grams': entry.grams,
+        'calories_per_100': entry.factsPer100g.calories,
+        'protein_per_100': entry.factsPer100g.protein,
+        'fat_per_100': entry.factsPer100g.fat,
+        'carbs_per_100': entry.factsPer100g.carbs,
+        'timestamp': entry.timestamp.millisecondsSinceEpoch,
+        'category': entry.category.storageValue,
+        'source': entry.source,
+        'note': entry.note,
+        'image_path': entry.imagePath,
+        'labels': entry.labels == null ? null : jsonEncode(entry.labels),
+      };
+
+  DiaryEntryV2 _fromDbMap(Map<String, Object?> map) {
+    final labelsRaw = map['labels'];
+    List<String>? labels;
+    if (labelsRaw is String && labelsRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(labelsRaw) as List<dynamic>;
+        labels = decoded.map((e) => e.toString()).toList();
+      } catch (_) {
+        labels = null;
+      }
+    }
+
+    return DiaryEntryV2(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      brand: map['brand'] as String?,
+      grams: (map['grams'] as num).toDouble(),
+      factsPer100g: NutritionFacts(
+        calories: (map['calories_per_100'] as num).toDouble(),
+        protein: (map['protein_per_100'] as num).toDouble(),
+        fat: (map['fat_per_100'] as num).toDouble(),
+        carbs: (map['carbs_per_100'] as num).toDouble(),
+      ),
+      timestamp: DateTime.fromMillisecondsSinceEpoch(
+          (map['timestamp'] as num).toInt()),
+      category: MealCategoryExt.fromStorage(map['category'] as String?),
+      source: map['source'] as String,
+      note: map['note'] as String?,
+      imagePath: map['image_path'] as String?,
+      labels: labels,
+    );
   }
 
   DiaryEntryV2? _legacyEntryFromJson(Map<String, dynamic> json) {
